@@ -1,11 +1,18 @@
 # ==============================================================================
-# Earthquake Alert and Safety Drill Automation for Home Assistant
-# Add to your Home Assistant automations.yaml
+# Earthquake automation for Home Assistant (Quake MCS Listener v2)
+# Add to your Home Assistant automations.yaml and start the bridge with
+#   --webhook-url http://<home-assistant>:8123/api/webhook/quake_alert_local
+#
+# Payload fields used here (see docs/HOW_IT_WORKS.md for the full list):
+#   level          alert | notice | cancel | drill
+#   status         early warning | rapid report | early alert | on-site trigger | cancelled
+#   estimated_mmi  intensity expected at your base station (Allen et al. 2012)
+#   s_wave_eta_s   seconds until the strong shaking arrives (null if unknown)
 # ==============================================================================
 
 - id: earthquake_early_alert_aeas
-  alias: "Earthquake Early Alert (AEAS MCS)"
-  description: "Receives real-time alerts from Quake MCS Listener and triggers critical notifications and safety actions."
+  alias: "Earthquake alert (Quake MCS Listener)"
+  description: "Early warnings, rapid reports, on-site triggers and drills from Quake MCS Listener."
   mode: parallel
   triggers:
     - trigger: webhook
@@ -16,28 +23,43 @@
   variables:
     d: "{{ trigger.json | default({}) }}"
     level: "{{ d.level | default(d.nivel | default('notice')) }}"
+    status: "{{ d.status | default('') }}"
     place: "{{ d.place | default(d.lugar | default('Earthquake detected')) }}"
-    mag: "{{ d.magnitude | default(d.magnitud | default('')) }}"
+    mag: "{{ d.magnitude | default(d.magnitud | default('?')) }}"
+    eta: "{{ (d.s_wave_eta_s | default(0, true) | float(0)) | round(0) | int }}"
   conditions:
     - condition: template
-      value_template: "{{ level in ['notice', 'warning', 'alert', 'drill', 'aviso', 'alerta', 'simulacro'] }}"
+      value_template: "{{ level in ['notice', 'warning', 'alert', 'drill', 'cancel', 'aviso', 'alerta', 'simulacro', 'cancelado'] }}"
   actions:
     - choose:
-        # Safety drill mode (runs custom drill script/lights for testing)
+        # Safety drill: runs your own drill script (lights, siren, TTS...)
         - conditions:
             - condition: template
               value_template: "{{ level in ['drill', 'simulacro'] }}"
           sequence:
             - action: script.quake_safety_drill
-        # Real high-severity alert
+
+        # The agency withdrew an early warning we already announced
+        - conditions:
+            - condition: template
+              value_template: "{{ level in ['cancel', 'cancelado'] }}"
+          sequence:
+            - action: persistent_notification.create
+              data:
+                notification_id: quake_alert_critical
+                title: "Earthquake warning cancelled"
+                message: "{{ place }}"
+
+        # Strong shaking expected at home (estimated MMI >= --alert-mmi)
         - conditions:
             - condition: template
               value_template: "{{ level in ['alert', 'alerta'] }}"
           sequence:
             - action: notify.notify
               data:
-                title: "🚨 EARTHQUAKE WARNING! M{{ mag }}"
-                message: "{{ place }} - Drop, Cover, and Hold On!"
+                title: >-
+                  {% if eta > 0 %}🚨 Shaking in {{ eta }} s · M{{ mag }}{% else %}🚨 Earthquake · M{{ mag }}{% endif %}
+                message: "{{ place }} — Drop, Cover, and Hold On!"
                 data:
                   push:
                     interruption-level: critical
@@ -47,7 +69,9 @@
                 title: "🚨 EARTHQUAKE WARNING! M{{ mag }}"
                 message: "{{ place }}"
       default:
+        # Light shaking expected, a rapid report after the fact, or an on-site trigger
         - action: notify.notify
           data:
-            title: "Earthquake Notice M{{ mag }}"
+            title: >-
+              {% if status == 'rapid report' %}Earthquake report{% elif status == 'on-site trigger' %}Sensor trigger{% else %}Earthquake notice{% endif %} · M{{ mag }}
             message: "{{ place }}"

@@ -46,6 +46,22 @@ rest:
           - distance_km
           - timestamp
           - level
+          - source
+          - status
+          - estimated_mmi
+          - mmi_label
+          - s_wave_eta_s
+          - depth_km
+          - url
+      - name: "Quake Listener Feeds Online"
+        unique_id: quake_listener_feeds_online
+        value_template: >-
+          {% set s = value_json.sources | default({}) %}
+          {% set ns = namespace(n=0) %}
+          {% for k, v in s.items() if v.enabled and v.connected %}{% set ns.n = ns.n + 1 %}{% endfor %}
+          {{ ns.n + (1 if value_json.google_mcs.connected else 0) }}
+        icon: mdi:access-point-network
+        unit_of_measurement: "feeds"
     binary_sensor:
       - name: "Quake Listener MCS Link"
         unique_id: quake_listener_mcs_link
