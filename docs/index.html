@@ -450,6 +450,15 @@
     .step p { margin-top: 8px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
     .step .meta { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
 
+    .source2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 28px; padding: 24px; margin-top: 14px; align-items: center; }
+    .source2::before { background: linear-gradient(135deg, rgba(34, 197, 94, 0.45), transparent 40%, transparent 70%, rgba(56, 189, 248, 0.25)); }
+    .source2 h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+    .source2 p { margin-top: 8px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
+    .s2-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .s2-facts div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, 0.015); min-width: 0; }
+    .s2-facts dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+    .s2-facts dd { font-size: 14px; font-weight: 500; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
     /* ---------- Status / community ---------- */
     .status { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 32px; padding: 30px; align-items: center; }
     .status::before { background: linear-gradient(135deg, rgba(234, 179, 8, 0.45), transparent 40%, transparent 70%, rgba(56, 189, 248, 0.3)); }
@@ -511,6 +520,7 @@
       .section-h > p { justify-self: start; }
       .steps { grid-template-columns: minmax(0, 1fr); }
       .status { grid-template-columns: minmax(0, 1fr); }
+      .source2 { grid-template-columns: minmax(0, 1fr); }
     }
     @media (max-width: 720px) {
       .wrap { padding: 0 16px; }
@@ -612,8 +622,8 @@
         <p class="eyebrow"><span class="tag">MIT</span> Android Earthquake Alerts → Home Assistant</p>
         <h1>Earthquake warnings, <span class="soft">straight into your smart home.</span></h1>
         <p class="lede">
-          One Python file that listens on the same push channel Android phones use for earthquake alerts,
-          and turns each alert into a <b>Home Assistant webhook</b>. No emulator, no <span class="mono">pip install</span>, under 15&nbsp;MB of RAM.
+          One Python file that follows two push streams, Google's MCS channel (experimental) and EMSC's live global feed,
+          and turns quakes near you into a <b>Home Assistant webhook</b>. No emulator, no <span class="mono">pip install</span>, under 15&nbsp;MB of RAM.
         </p>
 
         <div class="install card" id="install">
@@ -704,6 +714,7 @@
               <span class="k">Bridge</span>
               <div class="big" id="st-link" style="color:var(--amber)">Standalone</div>
               <div class="sub" id="st-link-sub">scanning loopback…</div>
+              <div class="sub mono" id="st-hwid" title="Anonymous device ID, made locally"></div>
             </div>
             <div class="stat">
               <span class="k">MCS latency</span>
@@ -717,9 +728,9 @@
               <div class="sub" id="st-msgs">0 data messages</div>
             </div>
             <div class="stat">
-              <span class="k">Device ID</span>
-              <div class="big mono" id="st-hwid" style="font-size:18px;padding-top:4px">—</div>
-              <div class="sub">anonymous, made locally</div>
+              <span class="k">EMSC events</span>
+              <div class="big" id="st-emsc">0</div>
+              <div class="sub" id="st-emsc-sub">global real-time feed</div>
             </div>
           </div>
         </article>
@@ -866,6 +877,20 @@
           <div class="meta">webhook · REST :8990 · HMAC-SHA256</div>
         </article>
       </div>
+
+      <div class="card source2" data-reveal>
+        <div>
+          <p class="kicker" style="color:var(--green)">Second source</p>
+          <h3>EMSC keeps the lights on.</h3>
+          <p>The European-Mediterranean Seismological Centre pushes every new or revised quake worldwide over a public WebSocket. The bridge follows it too and fires your webhook for events near your station. It arrives minutes after the shaking, so treat it as a fast report rather than a warning.</p>
+        </div>
+        <dl class="s2-facts">
+          <div><dt>Transport</dt><dd class="mono">wss://seismicportal.eu</dd></div>
+          <div><dt>Measured delay</dt><dd>~6–8 min</dd></div>
+          <div><dt>Coverage</dt><dd>worldwide</dd></div>
+          <div><dt>License</dt><dd>CC BY 4.0</dd></div>
+        </dl>
+      </div>
     </section>
 
     <!-- Status -->
@@ -873,8 +898,8 @@
       <div class="card status" data-reveal>
         <div>
           <p class="kicker" style="color:var(--amber)">03 / Where it stands</p>
-          <h2>Honest status: experimental.</h2>
-          <p>The plumbing works: handshake, heartbeats and the alert decoder are all verified. What we haven't seen yet is a real earthquake flow through it, and you can't schedule one of those. If you live somewhere that shakes, run the bridge and tell us what you see.</p>
+          <h2>Honest status: the Google path is a long shot.</h2>
+          <p>The MCS plumbing works: TLS, login, heartbeats and the alert decoder are verified. But Google targets earthquake alerts at phones running Play services, picked by the location they report. An anonymous client like this one isn't on that list, and in our tests it gets heartbeats and nothing else. That's why the bridge also follows EMSC, which does deliver, minutes after the fact. If you can prove the Google path delivers, we'd love to see the logs.</p>
           <div class="status-ctas">
             <a class="btn btn-primary" href="https://github.com/Juanipis/quake-alert-listener/issues/new" target="_blank" rel="noopener">Report what you see</a>
             <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Read the code</a>
@@ -883,8 +908,9 @@
         <ul class="checks">
           <li><svg class="i ok"><use href="#i-check"/></svg>TLS + MCS login handshake<span>verified</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>Heartbeat keepalive &amp; reconnect<span>verified</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Protobuf alert decoder<span>verified</span></li>
-          <li><svg class="i wait"><use href="#i-clock"/></svg>A real quake, end to end<span>waiting</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Protobuf alert decoder<span>synthetic only</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>EMSC real-time feed<span>live</span></li>
+          <li><svg class="i wait"><use href="#i-clock"/></svg>An AEAS alert reaching this client<span>never seen</span></li>
         </ul>
       </div>
     </section>
@@ -899,7 +925,7 @@
         <a href="https://github.com/Juanipis/quake-alert-listener/issues" target="_blank" rel="noopener">Issues</a>
       </nav>
       <p class="legal">
-        Independent, non-profit open-source project for home automation and civil protection research. Not affiliated with, endorsed by or sponsored by Google LLC. Android and Google are trademarks of their respective owners. Built with Google Antigravity and Gemini 3.8 Flash. Map tiles © Esri and OpenStreetMap contributors.
+        Independent, non-profit open-source project for home automation and civil protection research. Not affiliated with, endorsed by or sponsored by Google LLC. Android and Google are trademarks of their respective owners. Built with Google Antigravity and Gemini 3.8 Flash. Map tiles © Esri and OpenStreetMap contributors. Earthquake reports © EMSC (seismicportal.eu), CC BY 4.0.
       </p>
     </div>
   </footer>
@@ -929,6 +955,7 @@
       paused: false,
       latHist: [],
       simPings: 0,
+      simEmsc: 0,
       suppressQuakeUntil: 0,
     };
 
@@ -1242,9 +1269,11 @@
     const FILTER_OF = { hb: 'hb', iq: 'hb', data: 'data', alert: 'data', sys: 'sys', warn: 'sys' };
 
     function classify(msg) {
-      if (/error|exception|warning|fail|reject|disallow|denied/i.test(msg)) return ['warn', 'Error'];
+      if (/\berror\b|exception|^warning|warning:|fail|reject|disallow|denied|refused|silent for/i.test(msg)) return ['warn', 'Error'];
       if (/EARTHQUAKE|alert detected/i.test(msg)) return ['alert', 'QuakeAlert'];
       if (/drill/i.test(msg)) return ['alert', 'Drill'];
+      if (/^EMSC (create|update|insert)/i.test(msg)) return ['data', 'EMSC'];
+      if (/^EMSC|emsc/i.test(msg)) return ['sys', 'EMSC'];
       if (/interval|starting|telemetry server|stopp/i.test(msg)) return ['sys', 'Log'];
       if (/iq ?stanza/i.test(msg)) return ['iq', 'IqStanza'];
       if (/heartbeat ?ack|pong|ack(nowledged)?\b/i.test(msg)) return ['hb', 'HeartbeatAck'];
@@ -1324,7 +1353,7 @@
         addLine(`Local bridge linked on ${state.base.replace('http://', '')}`, { kind: 'sys', tag: 'Bridge' });
         toast('Bridge linked — showing live data');
       } else {
-        $('#st-hwid').textContent = '—';
+        $('#st-hwid').textContent = '';
         addLine('Bridge went quiet. Back to simulated traffic.', { kind: 'warn', tag: 'Bridge' });
       }
     }
@@ -1361,17 +1390,24 @@
         pings: g.pings_received | 0,
         msgs: g.messages_received | 0,
         det: d.total_detections | 0,
+        emsc: (d.emsc && d.emsc.events_received) | 0,
       };
       if (g.latency_ms != null && g.latency_ms !== state.latHist[state.latHist.length - 1]) setLatency(g.latency_ms);
       if (state.prev) {
         if (cur.pings > state.prev.pings) pulse('ping', 'HEARTBEAT');
         if (cur.msgs > state.prev.msgs) pulse('data', 'DATA');
+        if (cur.emsc > state.prev.emsc) pulse('data', 'EMSC');
         if (cur.det > state.prev.det && Date.now() > state.suppressQuakeUntil) onQuake(d.last_quake || {});
       }
       state.prev = cur;
       setCount('#st-pings', cur.pings);
       $('#st-msgs').textContent = `${cur.msgs} data message${cur.msgs === 1 ? '' : 's'}`;
-      if (g.android_id) $('#st-hwid').textContent = maskId(g.android_id);
+      if (g.android_id) $('#st-hwid').textContent = `device ${maskId(g.android_id)}`;
+      if (d.emsc) {
+        setCount('#st-emsc', cur.emsc);
+        $('#st-emsc-sub').textContent = !d.emsc.enabled ? 'disabled (--no-emsc)'
+          : d.emsc.connected ? 'connected · worldwide' : 'reconnecting…';
+      }
       if (g.last_packet_ts) $('#hud-last').textContent = new Date(g.last_packet_ts * 1000).toTimeString().slice(0, 8);
 
       const logs = Array.isArray(d.recent_logs) ? d.recent_logs : [];
@@ -1395,6 +1431,15 @@
           setLatency(ms);
           setCount('#st-pings', ++state.simPings);
           pulse('ping', 'HEARTBEAT');
+          if (Math.random() < 0.2) {
+            setTimeout(() => {
+              if (state.linked) return;
+              const m = (1.5 + Math.random() * 2.5).toFixed(1);
+              addLine(`EMSC update: M${m} Test Region, depth ${Math.round(5 + Math.random() * 30)} km (simulated)`);
+              setCount('#st-emsc', ++state.simEmsc);
+              pulse('data', 'EMSC');
+            }, 2600);
+          }
           if (Math.random() < 0.3) {
             setTimeout(() => {
               if (state.linked) return;
@@ -1466,9 +1511,15 @@
     function onQuake(q) {
       const mag = q.magnitude ?? q.magnitud ?? '?';
       const drill = /drill|simulacro/i.test(q.level || q.nivel || '');
-      showAlert(drill ? `Drill · M${mag}` : `Earthquake alert · M${mag}`, q.place || q.lugar || 'Received from the bridge');
-      siren(); speak(drill ? `This is a drill. Magnitude ${mag}.` : `Earthquake alert. Magnitude ${mag}.`);
-      pulse('quake', drill ? 'DRILL' : 'QUAKE');
+      const report = /EMSC/i.test(q.source || '');
+      const loud = drill || (q.level || q.nivel) === 'alert' || (q.level || q.nivel) === 'alerta';
+      const title = drill ? `Drill · M${mag}` : report ? `Earthquake report · M${mag}` : `Earthquake alert · M${mag}`;
+      showAlert(title, q.place || q.lugar || 'Received from the bridge', loud ? 9 : 6);
+      if (loud) {
+        siren();
+        speak(drill ? `This is a drill. Magnitude ${mag}.` : `Earthquake ${report ? 'report' : 'alert'}. Magnitude ${mag}.`);
+      }
+      pulse('quake', drill ? 'DRILL' : report ? 'EMSC' : 'QUAKE');
       if (q.lat != null && q.lon != null) ripple(q.lat, q.lon);
     }
 
