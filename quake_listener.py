@@ -1160,7 +1160,9 @@ def estimate_mmi(magnitude, hypo_km):
 
 
 def mmi_name(mmi):
-    return MMI_NAMES[max(1, min(int(round(mmi)), 10)) - 1]
+    # Round the 1-decimal value half-up, so "4.5" reads as V everywhere (not banker's rounding)
+    level = int(math.floor(round(mmi, 1) + 0.5))
+    return MMI_NAMES[max(1, min(level, 10)) - 1]
 
 
 def assess_impact(ev, base_lat, base_lon, now=None):

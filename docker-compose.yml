@@ -1,0 +1,24 @@
+# docker compose up -d --build
+services:
+  quake-listener:
+    build: .
+    container_name: quake-listener
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8990:8990"        # REST API for the web console and Home Assistant on this host
+      # - "8888:8888/udp"             # Raspberry Shake datacast (also set QUAKE_SHAKE_UDP below)
+    environment:
+      QUAKE_LAT: "0.0"               # your base station: intensity and countdowns are computed here
+      QUAKE_LON: "0.0"
+      QUAKE_NAME: "Base Station"
+      QUAKE_WEBHOOK_URL: ""          # e.g. http://homeassistant.local:8123/api/webhook/quake_alert_local
+      # QUAKE_WEBHOOK_SECRET: "change-me"     # HMAC-SHA256 signature in X-Quake-Signature
+      # QUAKE_SOURCES: "mcs,emsc,wolfx"
+      # QUAKE_NOTICE_MMI: "3.0"               # Android "Be Aware"
+      # QUAKE_ALERT_MMI: "5.0"                # Android "Take Action"
+      # QUAKE_SHAKE_UDP: "8888"
+    volumes:
+      - quake-data:/data
+
+volumes:
+  quake-data:

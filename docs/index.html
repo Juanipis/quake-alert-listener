@@ -450,6 +450,35 @@
     .step p { margin-top: 8px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
     .step .meta { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
 
+    /* what-would-you-feel calculator */
+    .calc { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 32px; padding: 26px; margin-top: 14px; }
+    .calc h3 { font-size: 22px; font-weight: 600; letter-spacing: -0.025em; }
+    .calc-lede { color: var(--muted); font-size: 14px; margin: 6px 0 18px; }
+    .rng { display: block; margin-top: 14px; }
+    .rng span { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    .rng b { font-family: var(--mono); font-weight: 500; color: var(--text); }
+    .rng input { width: 100%; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 99px; background: linear-gradient(90deg, var(--cyan) var(--p, 50%), #1e293b var(--p, 50%)); outline: none; cursor: pointer; }
+    .rng input::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #e2e8f0; border: 3px solid #0b1120; box-shadow: 0 0 0 1px var(--cyan), 0 0 14px rgba(56, 189, 248, 0.5); transition: transform 0.15s; }
+    .rng input:active::-webkit-slider-thumb { transform: scale(1.18); }
+    .rng input::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: #e2e8f0; border: 3px solid #0b1120; box-shadow: 0 0 0 1px var(--cyan); }
+    .rng input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 6px; }
+    .mmi { display: flex; align-items: center; gap: 16px; }
+    .mmi-badge { width: 72px; height: 72px; flex: none; border-radius: 16px; display: grid; place-items: center; font-family: var(--mono); font-size: 26px; font-weight: 500; color: #0b1120; background: var(--mmi, #a5f3fc); box-shadow: 0 0 34px -6px var(--mmi, #a5f3fc); transition: background 0.3s, box-shadow 0.3s; }
+    .mmi-name { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; text-transform: capitalize; }
+    .mmi-sub { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .tl { position: relative; height: 46px; margin: 22px 4px 4px; }
+    .tl-bar { position: absolute; left: 0; right: 0; top: 10px; height: 6px; border-radius: 99px; background: #1e293b; overflow: hidden; }
+    .tl-bar i { position: absolute; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(34, 197, 94, 0.35), var(--green)); transition: left 0.25s, width 0.25s; }
+    .tl-m { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 2px; transition: left 0.25s; }
+    .tl-m::before { content: ""; width: 2px; height: 26px; border-radius: 2px; background: var(--cyan); }
+    .tl-m b { font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--cyan); }
+    .tl-e::before { background: var(--green); } .tl-e b { color: var(--green); }
+    .tl-s::before { background: var(--red); } .tl-s b { color: #fca5a5; }
+    .calc-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+    .calc-facts div { padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, 0.015); min-width: 0; }
+    .calc-facts dt { font-size: 11.5px; color: var(--dim); }
+    .calc-facts dd { font-family: var(--mono); font-size: 20px; font-weight: 500; margin-top: 2px; font-variant-numeric: tabular-nums; }
+    .calc-note { margin-top: 12px; font-size: 11.5px; color: var(--dim); }
     .sources { padding: 24px; margin-top: 14px; }
     .sources::before { background: linear-gradient(135deg, rgba(34, 197, 94, 0.45), transparent 40%, transparent 70%, rgba(56, 189, 248, 0.25)); }
     .src-head h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
@@ -542,6 +571,7 @@
       .status { grid-template-columns: minmax(0, 1fr); }
       .source2 { grid-template-columns: minmax(0, 1fr); }
       .src-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .calc { grid-template-columns: minmax(0, 1fr); }
     }
     @media (max-width: 720px) {
       .wrap { padding: 0 16px; }
@@ -567,6 +597,8 @@
       footer .wrap { grid-template-columns: 1fr; }
       .status { padding: 22px; }
       .src-grid { grid-template-columns: minmax(0, 1fr); }
+      .calc { padding: 20px; }
+      .calc-facts { grid-template-columns: minmax(0, 1fr); }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
@@ -878,6 +910,39 @@
         </div>
         <div class="race-axis"><span></span><span class="ax"><span>0 s</span><span>30 s</span><span>60 s</span></span><span></span></div>
         <p class="race-note">Illustration with one quake at 8 s. A poller only finds out on its next request; a push lands as soon as the network publishes it. For scale: P-waves travel at roughly 6 km/s, the damaging S-waves at about 3.5 km/s. The gap between them is the whole warning window.</p>
+      </div>
+
+      <div class="card calc reg" id="calc" data-reveal>
+        <div class="calc-in">
+          <p class="kicker">Try it</p>
+          <h3>What would you feel?</h3>
+          <p class="calc-lede">The same model the bridge runs for every quake. Move the sliders.</p>
+          <label class="rng"><span>Magnitude <b id="c-m-v">6.0</b></span><input type="range" id="c-m" min="3" max="8.5" step="0.1" value="6.0"></label>
+          <label class="rng"><span>Distance to you <b id="c-d-v">60 km</b></span><input type="range" id="c-d" min="5" max="400" step="1" value="60"></label>
+          <label class="rng"><span>Depth <b id="c-z-v">10 km</b></span><input type="range" id="c-z" min="0" max="150" step="1" value="10"></label>
+        </div>
+        <div class="calc-out">
+          <div class="mmi">
+            <div class="mmi-badge" id="c-badge">VI</div>
+            <div>
+              <span class="k">Estimated intensity at home</span>
+              <div class="mmi-name" id="c-name">strong</div>
+              <div class="mmi-sub" id="c-level">level: alert · "Take Action"</div>
+            </div>
+          </div>
+          <div class="tl" aria-hidden="true">
+            <div class="tl-bar"><i id="c-warn"></i></div>
+            <span class="tl-m" id="c-p" style="left:0"><b>P</b></span>
+            <span class="tl-m tl-e" id="c-e" style="left:0"><b>EEW</b></span>
+            <span class="tl-m tl-s" id="c-s" style="left:100%"><b>S</b></span>
+          </div>
+          <dl class="calc-facts">
+            <div><dt>Strong shaking (S) arrives</dt><dd id="c-sat">17 s</dd></div>
+            <div><dt>Warning from an EEW feed</dt><dd id="c-eew">12 s</dd></div>
+            <div><dt>Warning from your own sensor</dt><dd id="c-onsite">7 s</dd></div>
+          </dl>
+          <p class="calc-note">Median estimate, Allen, Wald &amp; Worden (2012); local soil can shift it about ±1 level. EEW assumes the warning is issued 5 s after origin.</p>
+        </div>
       </div>
 
       <div class="steps">
@@ -1535,7 +1600,48 @@
       return Math.max(1, Math.min(mmi, 12));
     }
     const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X+'];
-    const roman = (mmi) => ROMAN[Math.max(1, Math.min(Math.round(mmi), 10)) - 1];
+    const mmiLevel = (mmi) => Math.max(1, Math.min(Math.floor(Math.round(mmi * 10) / 10 + 0.5), 10));
+    const roman = (mmi) => ROMAN[mmiLevel(mmi) - 1];
+    const MMI_NAME = ['not felt', 'weak', 'weak', 'light', 'moderate', 'strong', 'very strong', 'severe', 'violent', 'extreme'];
+    // USGS ShakeMap intensity colours
+    const MMI_COLOR = ['#e2e8f0', '#bfdbfe', '#a5f3fc', '#86efac', '#fde047', '#fbbf24', '#fb923c', '#f87171', '#ef4444', '#b91c1c'];
+
+    (function calculator() {
+      const m = $('#c-m'), d = $('#c-d'), z = $('#c-z');
+      if (!m) return;
+      const EEW_DELAY = 5;
+      function fill(el) { el.style.setProperty('--p', ((el.value - el.min) / (el.max - el.min)) * 100 + '%'); }
+      function update() {
+        [m, d, z].forEach(fill);
+        const M = +m.value, D = +d.value, Z = +z.value;
+        const R = Math.hypot(D, Z), mmi = estimateMMI(M, R), k = mmiLevel(mmi);
+        const tp = R / 6, ts = R / 3.5;
+        $('#c-m-v').textContent = M.toFixed(1);
+        $('#c-d-v').textContent = `${D} km`;
+        $('#c-z-v').textContent = `${Z} km`;
+        $('#c-badge').textContent = roman(mmi);
+        $('#calc').style.setProperty('--mmi', MMI_COLOR[k - 1]);
+        $('#c-name').textContent = MMI_NAME[k - 1];
+        const m1 = Math.round(mmi * 10) / 10;   // the bridge compares the 1-decimal value too
+        const lvl = m1 >= 5 ? 'alert · "Take Action"' : m1 >= 3 ? 'notice · "Be Aware"' : 'below notification threshold';
+        $('#c-level').textContent = `MMI ${m1.toFixed(1)} · level: ${lvl}`;
+        const eew = Math.max(0, ts - EEW_DELAY), onsite = Math.max(0, ts - tp);
+        $('#c-sat').textContent = `${ts.toFixed(0)} s`;
+        $('#c-eew').textContent = eew > 0.5 ? `${eew.toFixed(0)} s` : 'none';
+        $('#c-onsite').textContent = `${onsite.toFixed(0)} s`;
+        const span = Math.max(ts, EEW_DELAY) * 1.06;
+        const pct = (t) => `${Math.min(100, (t / span) * 100)}%`;
+        $('#c-p').style.left = pct(tp);
+        $('#c-e').style.left = pct(EEW_DELAY);
+        $('#c-s').style.left = pct(ts);
+        const w = $('#c-warn');
+        const from = Math.min(tp, EEW_DELAY);
+        w.style.left = pct(from);
+        w.style.width = `${Math.max(0, ((ts - from) / span) * 100)}%`;
+      }
+      [m, d, z].forEach((el) => el.addEventListener('input', update));
+      update();
+    })();
 
     /* ---------------- Alert overlay ---------------- */
     let alertTimer, countTimer;

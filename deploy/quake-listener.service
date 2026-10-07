@@ -1,0 +1,41 @@
+# systemd unit for a Raspberry Pi or any Linux box, without Docker.
+#
+#   sudo useradd --system --no-create-home quake
+#   sudo install -D -m 0644 quake_listener.py /opt/quake-listener/quake_listener.py
+#   sudo install -D -m 0640 deploy/quake-listener.env /etc/default/quake-listener   # then edit it
+#   sudo install -m 0644 deploy/quake-listener.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now quake-listener
+#   journalctl -u quake-listener -f
+
+[Unit]
+Description=Quake MCS Listener (earthquake warnings -> Home Assistant)
+Documentation=https://github.com/Juanipis/quake-alert-listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quake
+StateDirectory=quake-listener
+Environment=QUAKE_CREDENTIALS_FILE=/var/lib/quake-listener/credentials.json
+EnvironmentFile=-/etc/default/quake-listener
+ExecStart=/usr/bin/python3 /opt/quake-listener/quake_listener.py
+Restart=always
+RestartSec=5
+
+# Hardening: the bridge only needs the network and its state directory
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target

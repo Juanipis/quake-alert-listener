@@ -117,6 +117,8 @@ class Intensity(unittest.TestCase):
         self.assertTrue(ql.mmi_name(3.7).startswith("IV"))
         self.assertTrue(ql.mmi_name(0.2).startswith("I "))
         self.assertTrue(ql.mmi_name(15).startswith("X+"))
+        self.assertTrue(ql.mmi_name(4.5).startswith("V "))     # half-up, not banker's rounding
+        self.assertTrue(ql.mmi_name(5.46).startswith("VI"))    # shown as 5.5 -> VI
 
     def test_assess_impact_eta(self):
         now = 1_000_000.0

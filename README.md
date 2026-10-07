@@ -107,6 +107,23 @@ Expected output:
 
 ---
 
+## 🐳 Run it 24/7
+
+**Docker Compose.** Edit `QUAKE_LAT`, `QUAKE_LON` and `QUAKE_WEBHOOK_URL` in [`docker-compose.yml`](docker-compose.yml), then:
+
+```bash
+docker compose up -d --build
+```
+
+The image (~55 MB, Alpine):
+- runs as an unprivileged user;
+- keeps the anonymous device identity in a volume (`/data`, mode `0600`);
+- reports healthy while at least one source is connected.
+
+**systemd** (a Raspberry Pi without Docker). Use [`deploy/quake-listener.service`](deploy/quake-listener.service), a hardened unit, together with [`deploy/quake-listener.env`](deploy/quake-listener.env). Install steps are in the unit's header.
+
+---
+
 ## 🧪 Tests
 
 ```bash
