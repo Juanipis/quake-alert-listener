@@ -708,7 +708,7 @@
             <div class="stat">
               <span class="k">MCS latency</span>
               <div class="big" id="st-lat">--<small>ms</small></div>
-              <div class="sub">TLS handshake</div>
+              <div class="sub">heartbeat round-trip</div>
               <svg class="spark" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"><path id="spark" d="" fill="none" stroke="#38bdf8" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
             </div>
             <div class="stat">
@@ -997,7 +997,7 @@
         case 'py':
           return `curl -sSL ${RAW}/quake_listener.py | python3 -` + (custom ? ` --lat ${la} --lon ${lo} --name "${name}"` : '');
         case 'docker':
-          return `docker run --rm -it -p 8990:8990 python:alpine sh -c "wget -qO- ${RAW}/quake_listener.py | python3 -` + (custom ? ` --lat ${la} --lon ${lo} --name '${name}'` : '') + '"';
+          return `docker run --rm -it -p 127.0.0.1:8990:8990 python:alpine sh -c "wget -qO- ${RAW}/quake_listener.py | python3 -` + (custom ? ` --lat ${la} --lon ${lo} --name '${name}'` : '') + '"';
         default:
           return `curl -sSL ${RAW}/run.sh | bash` + (custom ? ` -s -- --lat ${la} --lon ${lo} --name "${name}"` : '');
       }
@@ -1242,9 +1242,10 @@
     const FILTER_OF = { hb: 'hb', iq: 'hb', data: 'data', alert: 'data', sys: 'sys', warn: 'sys' };
 
     function classify(msg) {
+      if (/error|exception|warning|fail|reject|disallow|denied/i.test(msg)) return ['warn', 'Error'];
       if (/EARTHQUAKE|alert detected/i.test(msg)) return ['alert', 'QuakeAlert'];
       if (/drill/i.test(msg)) return ['alert', 'Drill'];
-      if (/error|exception|warning|fail/i.test(msg)) return ['warn', 'Error'];
+      if (/interval|starting|telemetry server|stopp/i.test(msg)) return ['sys', 'Log'];
       if (/iq ?stanza/i.test(msg)) return ['iq', 'IqStanza'];
       if (/heartbeat ?ack|pong|ack(nowledged)?\b/i.test(msg)) return ['hb', 'HeartbeatAck'];
       if (/heartbeat|ping|keepalive/i.test(msg)) return ['hb', 'HeartbeatPing'];
