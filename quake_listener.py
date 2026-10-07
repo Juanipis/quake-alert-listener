@@ -20,6 +20,7 @@ import datetime as dt
 import hashlib
 import hmac
 import http.server
+import ipaddress
 import json
 import math
 import os
@@ -73,6 +74,11 @@ CREDENTIALS_FILE = DEFAULT_CREDENTIALS_FILE
 # origins (http://127.0.0.1:*, http://localhost:*, http://[::1]:*) are always accepted.
 DEFAULT_ALLOWED_ORIGINS = "https://juanipis.github.io"
 ALLOWED_ORIGINS = set(DEFAULT_ALLOWED_ORIGINS.split(","))
+
+# Host names the REST API answers to (DNS-rebinding guard). IP literals, "localhost"
+# and this machine's own host name are always accepted; anything else needs
+# --allowed-hosts / QUAKE_ALLOWED_HOSTS ("*" disables the check).
+ALLOWED_HOSTS = set()
 
 RECENT_LOGS = collections.deque(maxlen=30)
 _LOG_LOCK = threading.Lock()
@@ -933,6 +939,46 @@ def is_origin_allowed(origin):
     return origin.rstrip("/") in ALLOWED_ORIGINS or _is_loopback_origin(origin)
 
 
+def _builtin_hosts():
+    names = {"localhost", "host.docker.internal"}
+    try:
+        h = socket.gethostname().strip().lower().rstrip(".")
+        if h:
+            short = h.split(".")[0]
+            names.update({h, short, short + ".local"})
+    except OSError:
+        pass
+    return names
+
+
+_BUILTIN_HOSTS = _builtin_hosts()
+
+
+def is_host_allowed(host_header):
+    """Reject requests addressed to a foreign domain name.
+
+    A DNS-rebinding page (attacker.example resolving to 127.0.0.1) talks to the
+    bridge same-origin, so it sends no Origin header on GETs; but its Host header
+    still carries the attacker's domain. Real clients use an IP, localhost or
+    this machine's name.
+    """
+    if not host_header or "*" in ALLOWED_HOSTS:
+        return True  # HTTP/1.0 clients may omit Host
+    try:
+        hostname = urllib.parse.urlsplit("//" + host_header.strip()).hostname
+    except ValueError:
+        return False
+    if not hostname:
+        return False
+    hostname = hostname.lower().rstrip(".")
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    return hostname in _BUILTIN_HOSTS or hostname.endswith(".localhost") or hostname in ALLOWED_HOSTS
+
+
 def _script_dir():
     path = globals().get("__file__")
     if path and os.path.isfile(path):
@@ -979,6 +1025,12 @@ class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
         if 0 < length <= 64 * 1024:
             self.rfile.read(length)
 
+    def _host_ok(self):
+        if is_host_allowed(self.headers.get("Host")):
+            return True
+        self._send_json(403, {"ok": False, "error": "host not allowed"})
+        return False
+
     def _origin_ok(self):
         if is_origin_allowed(self.headers.get("Origin")):
             return True
@@ -1003,12 +1055,16 @@ class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True, "acked": lat is not None, "latency_ms": lat, "error": error})
 
     def do_OPTIONS(self):
+        if not self._host_ok():
+            return
         self.send_response(204)
         self.send_cors_headers()
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def do_GET(self):
+        if not self._host_ok():
+            return
         clean_path = self._clean_path()
         if clean_path in ("/", "/index.html"):
             # If docs/index.html exists locally, serve the full dashboard
@@ -1041,6 +1097,9 @@ class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         self._discard_body()
+        if not self._host_ok():
+            log(f"Rejected {self.command} for foreign Host {self.headers.get('Host')!r}")
+            return
         clean_path = self._clean_path()
         if clean_path not in ("/drill", "/simulacro", "/ping"):
             self._send_json(404, {"ok": False, "error": "not found"})
@@ -1387,6 +1446,10 @@ def _origins(s):
     return set(items)
 
 
+def _hosts(s):
+    return {h.strip().lower().rstrip(".") for h in (s or "").split(",") if h.strip()}
+
+
 def build_parser():
     env = os.environ.get
     parser = argparse.ArgumentParser(
@@ -1401,6 +1464,7 @@ def build_parser():
     parser.add_argument("--http-port", type=_int_range(1, 65535, "port"), default=env("QUAKE_HTTP_PORT", "8990"), help="Local HTTP REST server port for Home Assistant (default: 8990)")
     parser.add_argument("--http-host", type=str, default=default_http_host(), help="Interface for the REST server (default: 127.0.0.1; 0.0.0.0 inside containers). Use 0.0.0.0 to expose it to your LAN / Docker networks")
     parser.add_argument("--allowed-origins", type=_origins, default=env("QUAKE_ALLOWED_ORIGINS", DEFAULT_ALLOWED_ORIGINS), help="Comma-separated browser origins allowed to use the REST API, or * for any (loopback origins and non-browser clients are always allowed)")
+    parser.add_argument("--allowed-hosts", type=_hosts, default=env("QUAKE_ALLOWED_HOSTS", ""), help="Extra comma-separated host names the REST API answers to, e.g. a DNS name for this machine (IPs, localhost and this machine's hostname always work; * disables the check)")
     parser.add_argument("--no-http", action="store_true", help="Disable the local HTTP REST telemetry server")
     parser.add_argument("--webhook-url", type=_webhook_url, default=env("QUAKE_WEBHOOK_URL", ""), help="Webhook destination URL (e.g. Home Assistant)")
     parser.add_argument("--webhook-secret", type=str, default=env("QUAKE_WEBHOOK_SECRET", ""), help="Optional HMAC-SHA256 secret for payload signing (prefer the env var: CLI args are visible in `ps`)")
@@ -1414,10 +1478,11 @@ def build_parser():
 
 
 def main():
-    global CREDENTIALS_FILE, ALLOWED_ORIGINS
+    global CREDENTIALS_FILE, ALLOWED_ORIGINS, ALLOWED_HOSTS
     args = build_parser().parse_args()
     CREDENTIALS_FILE = os.path.abspath(os.path.expanduser(args.credentials_file))
     ALLOWED_ORIGINS = args.allowed_origins
+    ALLOWED_HOSTS = args.allowed_hosts
 
     if args.test_ping:
         return test_ping(args)

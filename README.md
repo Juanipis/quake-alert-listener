@@ -100,6 +100,7 @@ Expected output:
 | `--http-port` | `QUAKE_HTTP_PORT` | `8990` | Local HTTP REST server port for Home Assistant |
 | `--http-host` | `QUAKE_HTTP_HOST` | `127.0.0.1` | Interface the REST server binds to (`0.0.0.0` automatically inside Docker/Podman). Use `0.0.0.0` to reach it from other machines or Docker networks |
 | `--allowed-origins` | `QUAKE_ALLOWED_ORIGINS` | `https://juanipis.github.io` | Comma-separated browser origins allowed to use the REST API (`*` = any). Loopback origins and non-browser clients (curl, Home Assistant) are always allowed |
+| `--allowed-hosts` | `QUAKE_ALLOWED_HOSTS` | *None* | Extra host names the REST API answers to. IP addresses, `localhost` and this machine's hostname always work (`*` disables the check) |
 | `--no-http` | - | `False` | Disable the local HTTP REST telemetry server |
 | `--webhook-url` | `QUAKE_WEBHOOK_URL` | *None* | Destination webhook URL (e.g. Home Assistant), `http://` or `https://` |
 | `--webhook-secret` | `QUAKE_WEBHOOK_SECRET` | *None* | Optional secret key for HMAC-SHA256 payload signing (prefer the env var: CLI args are visible in `ps`) |
@@ -142,6 +143,7 @@ Webhooks are sent from a background thread (so the MCS connection never stalls) 
 - **Local by default:** the REST API binds to `127.0.0.1`, so only this machine can reach it. This works as-is when Home Assistant runs on the same host (including Docker with `network_mode: host`).
 - **Home Assistant in another container or machine:** start the listener with `--http-host 0.0.0.0` (or set `QUAKE_HTTP_HOST=0.0.0.0`) and point the REST sensors at the host's IP. Only do this on a network you trust: the API has no authentication.
 - **Browser access is restricted:** websites can only call the API if their origin is in `--allowed-origins` (the official web app and `localhost` pages are allowed by default). Other sites get no CORS headers and `403` on `POST /drill` and `/ping`, so a random page can't trigger a drill or read your location. Pass `--allowed-origins "*"` to restore the old allow-all behaviour.
+- **DNS-rebinding guard:** requests whose `Host` header is a foreign domain name get `403`, so a malicious site can't point its own domain at `127.0.0.1` and read the API same-origin. Reaching the bridge by IP, `localhost` or this machine's hostname works as usual; add other names with `--allowed-hosts`.
 - **Credentials:** the anonymous device identity is stored with owner-only permissions (`0600`); existing files are tightened automatically. Webhook URLs are masked in logs and in `/status` because Home Assistant webhook IDs act as passwords.
 - **Clean shutdown:** `Ctrl+C`, `SIGTERM` (systemd, `docker stop`) close the MCS connection and the HTTP server cleanly and give in-flight webhooks up to 5 s to finish.
 
