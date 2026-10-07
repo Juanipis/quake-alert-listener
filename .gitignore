@@ -1,0 +1,9 @@
+.device_credentials.json
+.google_device.json
+.env
+.sismo.env
+*.db
+*.log
+__pycache__/
+*.pyc
+.DS_Store

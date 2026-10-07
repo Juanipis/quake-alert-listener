@@ -1,0 +1,53 @@
+# ==============================================================================
+# Earthquake Alert and Safety Drill Automation for Home Assistant
+# Add to your Home Assistant automations.yaml
+# ==============================================================================
+
+- id: earthquake_early_alert_aeas
+  alias: "Earthquake Early Alert (AEAS MCS)"
+  description: "Receives real-time alerts from Quake MCS Listener and triggers critical notifications and safety actions."
+  mode: parallel
+  triggers:
+    - trigger: webhook
+      webhook_id: "quake_alert_local"
+      allowed_methods:
+        - POST
+      local_only: true
+  variables:
+    d: "{{ trigger.json | default({}) }}"
+    level: "{{ d.level | default(d.nivel | default('notice')) }}"
+    place: "{{ d.place | default(d.lugar | default('Earthquake detected')) }}"
+    mag: "{{ d.magnitude | default(d.magnitud | default('')) }}"
+  conditions:
+    - condition: template
+      value_template: "{{ level in ['notice', 'warning', 'alert', 'drill', 'aviso', 'alerta', 'simulacro'] }}"
+  actions:
+    - choose:
+        # Safety drill mode (runs custom drill script/lights for testing)
+        - conditions:
+            - condition: template
+              value_template: "{{ level in ['drill', 'simulacro'] }}"
+          sequence:
+            - action: script.quake_safety_drill
+        # Real high-severity alert
+        - conditions:
+            - condition: template
+              value_template: "{{ level in ['alert', 'alerta'] }}"
+          sequence:
+            - action: notify.notify
+              data:
+                title: "🚨 EARTHQUAKE WARNING! M{{ mag }}"
+                message: "{{ place }} - Drop, Cover, and Hold On!"
+                data:
+                  push:
+                    interruption-level: critical
+            - action: persistent_notification.create
+              data:
+                notification_id: quake_alert_critical
+                title: "🚨 EARTHQUAKE WARNING! M{{ mag }}"
+                message: "{{ place }}"
+      default:
+        - action: notify.notify
+          data:
+            title: "Earthquake Notice M{{ mag }}"
+            message: "{{ place }}"

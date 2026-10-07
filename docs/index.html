@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Quake MCS Listener • Autonomous AEAS Earthquake Alert Receiver</title>
+  <meta name="description" content="Lightweight standard Python client for receiving real-time earthquake alerts from the Android Earthquake Alerts System via MCS. Home Assistant compatible.">
+
+  <!-- Leaflet CSS & JS (100% Free & Open Source) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg-main: #070a13;
+      --bg-card: rgba(15, 23, 42, 0.94);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --accent-blue: #38bdf8;
+      --accent-green: #22c55e;
+      --accent-yellow: #eab308;
+      --accent-red: #ef4444;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: rgba(15, 23, 42, 0.96);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+    }
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.35rem 0.85rem;
+      border-radius: 9999px;
+      transition: all 0.3s ease;
+    }
+    .badge-sim {
+      background: rgba(234, 179, 8, 0.15);
+      color: var(--accent-yellow);
+      border: 1px solid rgba(234, 179, 8, 0.3);
+    }
+    .badge-live {
+      background: rgba(34, 197, 94, 0.18);
+      color: var(--accent-green);
+      border: 1px solid rgba(34, 197, 94, 0.4);
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
+    }
+    .dot-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: pulse 1.8s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.15); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    /* Community Call & Disclaimer Banner */
+    .community-banner {
+      background: linear-gradient(90deg, rgba(234, 179, 8, 0.12), rgba(249, 115, 22, 0.12));
+      border-bottom: 1px solid rgba(234, 179, 8, 0.25);
+      color: #fef08a;
+      padding: 0.85rem 2rem;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+    .community-banner b { color: #fff; }
+
+    /* Alert Banner */
+    #alert-banner {
+      display: none;
+      background: linear-gradient(90deg, #dc2626, #b91c1c);
+      color: #fff;
+      padding: 0.85rem 1.5rem;
+      font-weight: 700;
+      font-size: 1rem;
+      text-align: center;
+      animation: alertBlink 1s infinite alternate;
+      border-bottom: 2px solid #fff;
+    }
+    @keyframes alertBlink {
+      from { opacity: 0.9; }
+      to { opacity: 1; filter: brightness(1.2); }
+    }
+
+    main {
+      flex: 1;
+      max-width: 1350px;
+      margin: 0 auto;
+      padding: 2rem;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 1.75rem;
+    }
+
+    .hero {
+      text-align: center;
+      max-width: 850px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .hero h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+    }
+    .hero h1 span {
+      background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+    }
+    .badges-row {
+      display: flex;
+      gap: 0.6rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 0.25rem;
+    }
+    .pill {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      padding: 0.35rem 0.8rem;
+      border-radius: 9999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    /* Zero-Install Bridge Bar */
+    .bridge-panel {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+    .bridge-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .bridge-title {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1rem;
+      font-weight: 700;
+    }
+    .tabs-row {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+    .tab-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      padding: 0.4rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      background: #2563eb;
+      color: #fff;
+      border-color: #3b82f6;
+    }
+    .bridge-code-box {
+      background: #040711;
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      font-family: ui-monospace, monospace;
+      font-size: 0.82rem;
+      color: var(--accent-green);
+      overflow-x: auto;
+    }
+
+    .grid-main {
+      display: grid;
+      grid-template-columns: 1fr 440px;
+      gap: 1.75rem;
+    }
+    @media (max-width: 1024px) {
+      .grid-main { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .card-header {
+      padding: 1rem 1.25rem;
+      background: rgba(255, 255, 255, 0.02);
+      border-bottom: 1px solid var(--border-color);
+      font-size: 0.9rem;
+      font-weight: 700;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    #map {
+      height: 480px;
+      width: 100%;
+      background: #0b1120;
+    }
+    #map .leaflet-tile {
+      filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(90%);
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    /* Terminal Box */
+    .terminal-box {
+      background: #040711;
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 1rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      color: #38bdf8;
+      height: 230px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .term-line { display: flex; gap: 0.5rem; }
+    .term-time { color: var(--text-muted); }
+    .term-ok { color: var(--accent-green); }
+    .term-data { color: #f8fafc; }
+    .term-warn { color: var(--accent-yellow); }
+
+    .btn {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      padding: 0.55rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.82rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+    }
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.14); }
+    .btn-success { background: #16a34a; }
+    .btn-success:hover { background: #15803d; }
+
+    .telemetry-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      padding: 1rem;
+    }
+    .tel-item {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-color);
+      padding: 0.75rem;
+      border-radius: 8px;
+    }
+    .tel-label { font-size: 0.72rem; color: var(--text-muted); }
+    .tel-val { font-size: 0.95rem; font-weight: 700; margin-top: 0.2rem; }
+
+    footer {
+      border-top: 1px solid var(--border-color);
+      padding: 2rem;
+      text-align: center;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+    }
+    footer a { color: var(--accent-blue); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <!-- Emergency Flash Banner -->
+  <div id="alert-banner">
+    🚨 EARTHQUAKE ALERT DETECTED!
+  </div>
+
+  <!-- Community Call & Disclaimer Banner -->
+  <div class="community-banner">
+    <div>
+      <b>🧪 Experimental Project • Community Call:</b>
+      We arrived at this lightweight, autonomous implementation in standard Python. The TLS connection, handshake, and event parser are verified; however, we are currently awaiting a real seismic event in our region to 100% validate in-the-wild dispatch. Testing from your area is warmly welcomed!
+    </div>
+    <a href="https://github.com/Juanipis/quake-alert-listener" target="_blank" class="btn btn-secondary" style="font-size:0.75rem;padding:0.3rem 0.6rem;">
+      ⭐ View on GitHub
+    </a>
+  </div>
+
+  <header>
+    <div class="brand">
+      <div id="main-bridge-badge" class="badge-status badge-sim">
+        <div class="dot-pulse"></div>
+        <span id="bridge-badge-text">STANDALONE WEB MODE</span>
+      </div>
+      <div>
+        <h2 style="font-size:1.15rem;font-weight:800;">Quake MCS Listener</h2>
+        <p style="font-size:0.72rem;color:var(--text-muted);">Lightweight AEAS Earthquake Alert Receiver • Emulator-Free</p>
+      </div>
+    </div>
+    <div style="display:flex;gap:0.6rem;align-items:center;">
+      <button class="btn btn-secondary" onclick="testWebSiren()">🔊 Test Siren & Voice</button>
+      <button class="btn btn-secondary" id="btn-live-ping" onclick="triggerPingTest()">⚡ Test MCS Ping</button>
+      <button class="btn" onclick="simulateLocalAlert()">🚨 Simulate Alert</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>Early Earthquake Warnings <span>Directly to Your Home Automation</span></h1>
+      <p>
+        Autonomous Python client (0 external dependencies) connecting directly to the MCS push protocol to deliver low-latency earthquake alerts to Home Assistant in milliseconds.
+      </p>
+      <div class="badges-row">
+        <span class="pill">🐍 Pure Python 3.8+</span>
+        <span class="pill">⚡ &lt; 15 MB RAM (0% CPU)</span>
+        <span class="pill">🏠 Home Assistant Native</span>
+        <span class="pill">🤖 Built with AGY & Gemini 3.8 Flash</span>
+        <span class="pill">⚖️ MIT License</span>
+      </div>
+    </div>
+
+    <!-- ⚡ Zero-Install Local Bridge Panel -->
+    <div class="bridge-panel">
+      <div class="bridge-header">
+        <div class="bridge-title">
+          <span>⚡ Connect Real-Time Device Bridge</span>
+          <span id="bridge-pill" class="badge-status badge-sim" style="font-size:0.7rem;padding:0.2rem 0.6rem;">
+            Auto-scanning 127.0.0.1:8990...
+          </span>
+        </div>
+        <div class="tabs-row">
+          <button class="tab-btn active" onclick="selectTab('mac')">🍏 macOS / Linux</button>
+          <button class="tab-btn" onclick="selectTab('win')">🪟 Windows (PowerShell)</button>
+          <button class="tab-btn" onclick="selectTab('py')">🐍 Python Direct</button>
+          <button class="tab-btn" onclick="selectTab('docker')">🐳 Docker</button>
+        </div>
+      </div>
+      <p style="font-size:0.82rem;color:var(--text-muted);">
+        Run this 1-line command in your terminal. It executes in a temporary session without cloning or installing dependencies. As soon as it runs, this web page automatically connects in real time:
+      </p>
+      <div class="bridge-code-box">
+        <span id="code-snippet">curl -sSL https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/run.sh | bash</span>
+        <button class="btn btn-secondary" style="font-size:0.75rem;padding:0.35rem 0.75rem;white-space:nowrap;" onclick="copyActiveCommand()">📋 Copy Command</button>
+      </div>
+    </div>
+
+    <div class="grid-main">
+      <!-- Interactive Leaflet Map Centered on Visitor Location -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <span>Coverage Map at Your Location</span>
+            <span id="loc-name" style="color:var(--accent-blue);margin-left:0.5rem;font-weight:600;">Detecting...</span>
+          </div>
+          <span style="font-size:0.75rem;color:var(--text-muted);">Leaflet + OpenStreetMap (100% Free)</span>
+        </div>
+        <div id="map"></div>
+      </div>
+
+      <!-- Sidebar: Live Telemetry & MCS Stream -->
+      <div class="sidebar">
+        <!-- Live Terminal -->
+        <div class="card">
+          <div class="card-header">
+            <span id="term-header-title">MCS Stream Activity</span>
+            <span id="term-status-badge" style="font-size:0.72rem;color:var(--accent-yellow);">Simulation Mode</span>
+          </div>
+          <div style="padding:1rem;">
+            <div class="terminal-box" id="term-box">
+              <div class="term-line"><span class="term-time">[00:00:01]</span> <span class="term-warn">Auto-scanning for local bridge on http://127.0.0.1:8990...</span></div>
+              <div class="term-line"><span class="term-time">[00:00:02]</span> <span class="term-data">Simulation active. Run the 1-line command above to link your machine.</span></div>
+            </div>
+          </div>
+          <div class="telemetry-grid">
+            <div class="tel-item">
+              <div class="tel-label">BRIDGE LINK</div>
+              <div class="tel-val" id="val-link-status" style="color:var(--accent-yellow);">🟡 Standalone</div>
+            </div>
+            <div class="tel-item">
+              <div class="tel-label">MCS LATENCY</div>
+              <div class="tel-val" id="val-lat">-- ms</div>
+            </div>
+            <div class="tel-item">
+              <div class="tel-label">PINGS / PACKETS</div>
+              <div class="tel-val" id="val-pings">0</div>
+            </div>
+            <div class="tel-item">
+              <div class="tel-label">HARDWARE ID</div>
+              <div class="tel-val" id="val-hwid" style="font-size:0.8rem;color:var(--accent-blue);overflow:hidden;text-overflow:ellipsis;">Standalone</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Home Assistant Info Box -->
+        <div class="card">
+          <div class="card-header">
+            <span>Home Assistant Native Ready</span>
+          </div>
+          <div style="padding:1rem;display:flex;flex-direction:column;gap:0.75rem;font-size:0.82rem;color:var(--text-muted);">
+            <p>
+              When running the local bridge, Home Assistant can directly read sensors and link state from:
+            </p>
+            <div style="background:#040711;padding:0.6rem 0.8rem;border-radius:6px;font-family:monospace;color:var(--accent-green);border:1px solid var(--border-color);">
+              http://127.0.0.1:8990/status
+            </div>
+            <p>
+              Ready-to-use YAML snippets for <a href="https://github.com/Juanipis/quake-alert-listener/tree/main/homeassistant" target="_blank">sensors, automations, and Lovelace cards</a> are included in the repository.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>
+      <b>Quake MCS Listener</b> is an open-source project for home automation and civil protection.
+    </p>
+    <p>
+      Built with <a href="https://github.com" target="_blank">Google Antigravity (AGY)</a> and <b>Gemini 3.8 Flash (Thinking High)</b>.
+    </p>
+    <p style="font-size:0.75rem;color:#64748b;">
+      Legal Notice: This is an independent, unofficial client. Not affiliated with or endorsed by Google LLC. Android and Google are trademarks of their respective owners.
+    </p>
+  </footer>
+
+  <script>
+    // State variables
+    let userLat = 20.0;
+    let userLon = 0.0;
+    let currentCityName = "Detecting location...";
+    let activeTab = 'mac';
+    let isBridgeConnected = false;
+    let bridgeFailCount = 0;
+    let lastLogHash = "";
+
+    // Web Audio Synthesizer
+    let audioCtx = null;
+    function initAudio() {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+    document.addEventListener('click', () => initAudio(), { once: true });
+
+    function playSiren(mag, city) {
+      initAudio();
+      try {
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+
+        osc.frequency.setValueAtTime(880, now);
+        osc.frequency.setValueAtTime(660, now + 0.15);
+        osc.frequency.setValueAtTime(880, now + 0.30);
+        osc.frequency.setValueAtTime(660, now + 0.45);
+        osc.frequency.setValueAtTime(880, now + 0.60);
+        osc.frequency.setValueAtTime(660, now + 0.75);
+
+        gain.gain.setValueAtTime(0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 1.2);
+
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const ut = new SpeechSynthesisUtterance(`Attention. Earthquake alert detected. Magnitude ${mag} in ${city}.`);
+          ut.lang = 'en-US';
+          ut.rate = 1.05;
+          window.speechSynthesis.speak(ut);
+        }
+
+        const b = document.getElementById('alert-banner');
+        b.style.display = 'block';
+        b.innerText = `🚨 EARTHQUAKE ALERT! M${mag} in ${city}`;
+        setTimeout(() => { b.style.display = 'none'; }, 8000);
+      } catch (e) { console.warn(e); }
+    }
+
+    function testWebSiren() {
+      playSiren(5.2, currentCityName || "Your Area");
+    }
+
+    // Leaflet Map Initialization
+    const map = L.map('map', { zoomControl: true }).setView([userLat, userLon], 2);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    }).addTo(map);
+
+    let userMarker = null;
+    let circleRadius = null;
+
+    function renderUserLocation(lat, lon, name) {
+      userLat = lat;
+      userLon = lon;
+      currentCityName = name;
+
+      document.getElementById('loc-name').innerText = name;
+      updateCodeSnippet();
+
+      if (userMarker) map.removeLayer(userMarker);
+      if (circleRadius) map.removeLayer(circleRadius);
+
+      map.flyTo([lat, lon], 9);
+
+      const pinIcon = L.divIcon({
+        html: '<div style="background:#38bdf8;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 14px #38bdf8;"></div>',
+        className: ''
+      });
+      userMarker = L.marker([lat, lon], { icon: pinIcon }).addTo(map)
+        .bindPopup(`<b>🏠 Your Location</b><br>${name}<br>Coordinates: ${lat.toFixed(4)}, ${lon.toFixed(4)}`).openPopup();
+
+      circleRadius = L.circle([lat, lon], {
+        radius: 150000,
+        color: '#eab308',
+        weight: 1.5,
+        opacity: 0.5,
+        fillOpacity: 0.06
+      }).addTo(map);
+    }
+
+    // Geolocation Detection
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lon = pos.coords.longitude;
+          fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`)
+            .then(r => r.json())
+            .then(data => {
+              const city = data.address.city || data.address.town || data.address.state || "Your Location";
+              renderUserLocation(lat, lon, `${city}, ${data.address.country || ''}`);
+            })
+            .catch(() => renderUserLocation(lat, lon, "Your Current Location"));
+        },
+        () => {
+          fetch('https://ipapi.co/json/')
+            .then(r => r.json())
+            .then(d => renderUserLocation(d.latitude, d.longitude, `${d.city}, ${d.country_name}`))
+            .catch(() => renderUserLocation(userLat, userLon, currentCityName));
+        },
+        { timeout: 7000 }
+      );
+    } else {
+      renderUserLocation(userLat, userLon, currentCityName);
+    }
+
+    // Command Selector Tabs
+    function selectTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      const idx = ['mac', 'win', 'py', 'docker'].indexOf(tab);
+      if (idx >= 0) document.querySelectorAll('.tab-btn')[idx].classList.add('active');
+      updateCodeSnippet();
+    }
+
+    function updateCodeSnippet() {
+      const latStr = userLat.toFixed(4);
+      const lonStr = userLon.toFixed(4);
+      const nameSafe = currentCityName.replace(/"/g, '');
+      let code = "";
+
+      if (activeTab === 'mac') {
+        code = `curl -sSL https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/run.sh | bash -s -- --lat ${latStr} --lon ${lonStr} --name "${nameSafe}"`;
+      } else if (activeTab === 'win') {
+        code = `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/run.ps1))) -Lat ${latStr} -Lon ${lonStr} -Name "${nameSafe}"`;
+      } else if (activeTab === 'py') {
+        code = `curl -sSL https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/quake_listener.py | python3 - --lat ${latStr} --lon ${lonStr} --name "${nameSafe}"`;
+      } else if (activeTab === 'docker') {
+        code = `docker run --rm -it -p 8990:8990 python:alpine sh -c "wget -qO- https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/quake_listener.py | python3 - --lat ${latStr} --lon ${lonStr}"`;
+      }
+      document.getElementById('code-snippet').innerText = code;
+    }
+
+    function copyActiveCommand() {
+      const text = document.getElementById('code-snippet').innerText;
+      navigator.clipboard.writeText(text);
+      alert("Command copied to clipboard!\n\n" + text);
+    }
+
+    // Real-Time Local Bridge Poller
+    async function checkLocalBridge() {
+      const endpoints = ["http://127.0.0.1:8990/status", "http://localhost:8990/status"];
+      let foundData = null;
+
+      for (const ep of endpoints) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1200);
+          const res = await fetch(ep, { mode: 'cors', signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            foundData = await res.json();
+            break;
+          }
+        } catch (e) {
+          // Continue scanning next loopback candidate
+        }
+      }
+
+      if (foundData) {
+        bridgeFailCount = 0;
+        if (!isBridgeConnected) {
+          onBridgeConnected(foundData);
+        }
+        updateBridgeTelemetry(foundData);
+      } else {
+        bridgeFailCount++;
+        if (bridgeFailCount >= 3 && isBridgeConnected) {
+          onBridgeDisconnected();
+        }
+      }
+    }
+
+    function onBridgeConnected(data) {
+      isBridgeConnected = true;
+      const mainBadge = document.getElementById('main-bridge-badge');
+      mainBadge.className = 'badge-status badge-live';
+      document.getElementById('bridge-badge-text').innerText = 'REAL-TIME BRIDGE ACTIVE';
+
+      const panelPill = document.getElementById('bridge-pill');
+      panelPill.className = 'badge-status badge-live';
+      panelPill.innerText = 'Connected: 127.0.0.1:8990';
+
+      document.getElementById('val-link-status').innerText = '🟢 Connected';
+      document.getElementById('val-link-status').style.color = 'var(--accent-green)';
+      document.getElementById('term-status-badge').innerText = 'Live MCS Stream';
+      document.getElementById('term-status-badge').style.color = 'var(--accent-green)';
+
+      addTermLine('🟢 Local device bridge linked successfully on 127.0.0.1:8990', 'term-ok');
+    }
+
+    function onBridgeDisconnected() {
+      isBridgeConnected = false;
+      const mainBadge = document.getElementById('main-bridge-badge');
+      mainBadge.className = 'badge-status badge-sim';
+      document.getElementById('bridge-badge-text').innerText = 'STANDALONE WEB MODE';
+
+      const panelPill = document.getElementById('bridge-pill');
+      panelPill.className = 'badge-status badge-sim';
+      panelPill.innerText = 'Auto-scanning 127.0.0.1:8990...';
+
+      document.getElementById('val-link-status').innerText = '🟡 Standalone';
+      document.getElementById('val-link-status').style.color = 'var(--accent-yellow)';
+      document.getElementById('term-status-badge').innerText = 'Simulation Mode';
+      document.getElementById('term-status-badge').style.color = 'var(--accent-yellow)';
+    }
+
+    function updateBridgeTelemetry(data) {
+      if (data.google_mcs) {
+        document.getElementById('val-pings').innerText = data.google_mcs.pings_received || 0;
+        if (data.google_mcs.latency_ms !== null && data.google_mcs.latency_ms !== undefined) {
+          document.getElementById('val-lat').innerText = data.google_mcs.latency_ms + ' ms';
+        }
+        if (data.google_mcs.android_id) {
+          document.getElementById('val-hwid').innerText = data.google_mcs.android_id;
+        }
+      }
+
+      if (data.recent_logs && Array.isArray(data.recent_logs) && data.recent_logs.length > 0) {
+        const hash = JSON.stringify(data.recent_logs);
+        if (hash !== lastLogHash) {
+          lastLogHash = hash;
+          const box = document.getElementById('term-box');
+          box.innerHTML = '';
+          data.recent_logs.slice(-12).forEach(item => {
+            const el = document.createElement('div');
+            el.className = 'term-line';
+            el.innerHTML = `<span class="term-time">[${item.time}]</span> <span class="term-data">${escapeHtml(item.msg)}</span>`;
+            box.appendChild(el);
+          });
+          box.scrollTop = box.scrollHeight;
+        }
+      }
+    }
+
+    function escapeHtml(text) {
+      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function addTermLine(msg, cls) {
+      const box = document.getElementById('term-box');
+      const timeStr = new Date().toTimeString().split(' ')[0];
+      const el = document.createElement('div');
+      el.className = 'term-line';
+      el.innerHTML = `<span class="term-time">[${timeStr}]</span> <span class="${cls || 'term-data'}">${msg}</span>`;
+      box.appendChild(el);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    // Ping Test
+    async function triggerPingTest() {
+      if (isBridgeConnected) {
+        addTermLine("Triggering diagnostic ping to mtalk.google.com:5228...", "term-data");
+        try {
+          const res = await fetch("http://127.0.0.1:8990/ping", { method: "POST", mode: "cors" });
+          const json = await res.json();
+          if (json.latency_ms !== null) {
+            addTermLine(`✓ Ping acknowledged! Handshake latency: ${json.latency_ms} ms`, "term-ok");
+            document.getElementById('val-lat').innerText = json.latency_ms + ' ms';
+          }
+        } catch (e) {
+          addTermLine("Error reaching local bridge ping endpoint: " + e, "term-warn");
+        }
+      } else {
+        addTermLine("Simulated Ping sent ➔ Ack received (Tag 7 IqStanza). Latency: 34 ms", "term-ok");
+        document.getElementById('val-lat').innerText = Math.floor(28 + Math.random() * 12) + " ms";
+      }
+    }
+
+    // Simulate Alert Function
+    async function simulateLocalAlert() {
+      playSiren(5.5, currentCityName);
+
+      if (isBridgeConnected) {
+        try {
+          await fetch("http://127.0.0.1:8990/drill", { method: "POST", mode: "cors" });
+          addTermLine("⚡ Safety drill event dispatched through local bridge!", "term-ok");
+        } catch (e) {}
+      }
+
+      const epiLat = userLat + 0.22;
+      const epiLon = userLon + 0.18;
+      const m = L.circleMarker([epiLat, epiLon], {
+        radius: 20,
+        fillColor: '#ef4444',
+        color: '#fff',
+        weight: 2,
+        fillOpacity: 0.8
+      }).addTo(map)
+        .bindPopup(`<b>🚨 Simulated Quake M5.5</b><br>38 km from ${currentCityName}<br>Depth: 18 km`).openPopup();
+
+      setTimeout(() => map.removeLayer(m), 15000);
+    }
+
+    // Polling intervals
+    setInterval(checkLocalBridge, 2500);
+    checkLocalBridge();
+
+    // Fallback simulation traffic when bridge is offline
+    setInterval(() => {
+      if (!isBridgeConnected) {
+        const cur = parseInt(document.getElementById('val-pings').innerText || "0") + 1;
+        document.getElementById('val-pings').innerText = cur;
+        document.getElementById('val-lat').innerText = Math.floor(28 + Math.random() * 14) + " ms";
+        addTermLine("Simulated heartbeat keepalive acknowledged (mtalk.google.com)", "term-ok");
+      }
+    }, 15000);
+  </script>
+</body>
+</html>

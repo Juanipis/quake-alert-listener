@@ -1,0 +1,62 @@
+# ==============================================================================
+# REST Sensors for Monitoring Quake MCS Listener in Home Assistant
+# Add to your Home Assistant configuration.yaml
+# ==============================================================================
+
+rest:
+  - resource: "http://127.0.0.1:8990/status"
+    scan_interval: 10
+    sensor:
+      - name: "Quake Listener Status"
+        unique_id: quake_listener_status
+        value_template: "{{ value_json.google_mcs.connected | default(value_json.google_mcs.conectado | default(false)) | iif('Connected', 'Disconnected') }}"
+        icon: mdi:google
+      - name: "Quake Listener Pings"
+        unique_id: quake_listener_pings
+        value_template: "{{ value_json.google_mcs.pings_received | default(value_json.google_mcs.pings_recibidos | default(0)) }}"
+        icon: mdi:heart-pulse
+        unit_of_measurement: "pkts"
+      - name: "Quake Listener Latency"
+        unique_id: quake_listener_latency
+        value_template: "{{ value_json.google_mcs.latency_ms | default(value_json.google_mcs.latencia_ms | default(0)) }}"
+        icon: mdi:speedometer
+        unit_of_measurement: "ms"
+      - name: "Quake Listener Hardware ID"
+        unique_id: quake_listener_hardware_id
+        value_template: "{{ value_json.google_mcs.android_id | default('N/A') }}"
+        icon: mdi:cellphone-wireless
+      - name: "Quake Listener Location"
+        unique_id: quake_listener_location
+        value_template: "{{ value_json.location.name | default(value_json.ubicacion.ciudad | default('Home')) }}"
+        icon: mdi:map-marker
+      - name: "Quake Listener Last Earthquake"
+        unique_id: quake_listener_last_quake
+        value_template: >-
+          {% set q = value_json.last_quake or value_json.ultimo_sismo %}
+          {% if q %}
+            M{{ q.magnitude or q.magnitud }} - {{ q.place or q.lugar }}
+          {% else %}
+            No quakes detected
+          {% endif %}
+        icon: mdi:earthquake
+        json_attributes_path: "$.last_quake"
+        json_attributes:
+          - magnitude
+          - place
+          - distance_km
+          - timestamp
+          - level
+    binary_sensor:
+      - name: "Quake Listener MCS Link"
+        unique_id: quake_listener_mcs_link
+        value_template: "{{ value_json.google_mcs.connected | default(value_json.google_mcs.conectado | default(false)) }}"
+        device_class: connectivity
+        icon: mdi:satellite-uplink
+
+rest_command:
+  quake_drill:
+    url: "http://127.0.0.1:8990/drill"
+    method: "POST"
+  quake_ping_test:
+    url: "http://127.0.0.1:8990/ping"
+    method: "POST"

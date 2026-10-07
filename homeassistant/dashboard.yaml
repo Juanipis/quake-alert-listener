@@ -1,0 +1,47 @@
+# ==============================================================================
+# Lovelace Dashboard Card for Home Assistant
+# Paste into any dashboard view or manual card
+# ==============================================================================
+
+type: vertical-stack
+cards:
+  - type: heading
+    heading: Earthquake Monitor (AEAS mtalk:5228)
+    icon: mdi:earthquake
+
+  - type: entities
+    title: TLS Link Telemetry
+    entities:
+      - entity: binary_sensor.quake_listener_mcs_link
+        name: TLS Link Status
+      - entity: sensor.quake_listener_status
+        name: MCS Protocol State
+      - entity: sensor.quake_listener_latency
+        name: Round-Trip Latency
+      - entity: sensor.quake_listener_pings
+        name: Packets Received
+      - entity: sensor.quake_listener_hardware_id
+        name: Anonymous Hardware ID
+
+  - type: entities
+    title: Station Location & Recent Events
+    entities:
+      - entity: sensor.quake_listener_location
+        name: Monitored Station
+      - entity: sensor.quake_listener_last_quake
+        name: Last Detected Event
+
+  - type: horizontal-stack
+    cards:
+      - type: button
+        name: Test Safety Drill
+        icon: mdi:alarm-light
+        tap_action:
+          action: call-service
+          service: rest_command.quake_drill
+      - type: button
+        name: Ping Test
+        icon: mdi:satellite-uplink
+        tap_action:
+          action: call-service
+          service: rest_command.quake_ping_test
