@@ -2,8 +2,8 @@
 
 # 🌐 Quake MCS Listener
 
-> **Lightweight, autonomous Python client for the Android Earthquake Alerts System (AEAS)**  
-> Direct, low-latency earthquake early warning integration for Home Assistant and local home automation.
+> **Lightweight, dependency-free bridge from earthquake push feeds to Home Assistant**  
+> An experimental Android Earthquake Alerts (MCS) client, plus EMSC real-time reports that work today.
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)
@@ -16,10 +16,15 @@
 ## 🧪 Project Status & Community Call
 
 > [!WARNING]
-> **Experimental Validation Notice:**  
-> We arrived at this lightweight, autonomous implementation using strictly the Python standard library. The direct TLS connection (`mtalk.google.com:5228`), protocol authentication handshake, and Protobuf stanza decoders are fully verified and operational. However, **we are currently awaiting a live, natural earthquake event in our test region to 100% validate in-the-wild dispatch**.  
-> 
-> If you live in a seismically active region and wish to run the listener to test, monitor, or report observations, **your testing and community feedback are warmly welcomed!**
+> **The Google (AEAS) path is experimental and has not delivered an alert.**
+> The TLS connection to `mtalk.google.com:5228`, the MCS login, the heartbeats and the protobuf decoder all work. However:
+> - Google sends Android Earthquake Alerts through Play services to phones chosen by the location they report.
+> - This anonymous, browser-type client is not one of those phones.
+> - In our captures it receives heartbeats and nothing else.
+>
+> That is why the bridge also follows the **EMSC real-time feed**, which reliably pushes earthquakes worldwide a few minutes after they happen. Those are rapid reports, not early warnings.
+>
+> The full analysis, with captures, is in **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**. If you can show the Google path delivering (`--debug-frames` logs), please open an issue.
 
 ---
 
@@ -28,6 +33,7 @@
 - **Zero External Dependencies:** Built entirely with Python's standard library (`socket`, `ssl`, `struct`, `urllib`). No `pip install`, heavy runtimes, or Android emulators required.
 - **Ultra-Lightweight:** Consumes less than **15 MB of RAM** and **0.0% CPU** at idle. Perfect for running 24/7 on a Raspberry Pi, home server, or Docker container.
 - **Configurable Keepalive Pings:** Network-friendly ping intervals (`--ping-interval 120`, configurable between 30s and 600s) with exponential backoff on reconnects.
+- **Two Push Sources:** Google's MCS channel (experimental AEAS decoder) plus EMSC's public real-time WebSocket (worldwide, CC BY 4.0), with distance, magnitude and freshness filters so only quakes near you fire the webhook.
 - **Home Assistant Native Integration:** Automatically dispatches structured local webhooks to Home Assistant including magnitude, coordinates, epicenter distance in kilometers, and severity level.
 - **Interactive Web Demo:** Includes an interactive [GitHub Pages](https://juanipis.github.io/quake-alert-listener/) web app that detects your local coordinates and generates a ready-to-run CLI command for your location.
 
@@ -106,6 +112,10 @@ Expected output:
 | `--webhook-secret` | `QUAKE_WEBHOOK_SECRET` | *None* | Optional secret key for HMAC-SHA256 payload signing (prefer the env var: CLI args are visible in `ps`) |
 | `--credentials-file` | `QUAKE_CREDENTIALS_FILE` | `~/.quake_device_credentials.json` | Where the anonymous device identity is stored (written with `0600` permissions) |
 | `--locale` / `--timezone` | `QUAKE_LOCALE` / `QUAKE_TIMEZONE` | `en_US` / `UTC` | Values sent once when registering the anonymous device |
+| `--no-emsc` | `QUAKE_NO_EMSC` | `False` | Disable the EMSC real-time feed |
+| `--emsc-min-mag` | `QUAKE_EMSC_MIN_MAG` | `4.0` | Minimum magnitude for an EMSC event to fire the webhook |
+| `--emsc-radius-km` | `QUAKE_EMSC_RADIUS_KM` | `300` | Only EMSC events within this distance of your base station fire the webhook |
+| `--debug-frames` | `QUAKE_DEBUG_FRAMES` | `False` | Log a one-line summary of every non-heartbeat MCS frame (protocol research) |
 | `--test-ping` | - | - | Executes a single diagnostic ping and exits |
 | `--simulate` | - | - | Tests internal Protobuf event decoding |
 | `--version` | - | - | Prints the listener version |

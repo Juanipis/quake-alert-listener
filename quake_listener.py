@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import base64
 import collections
 import copy
 import datetime as dt
@@ -40,7 +41,7 @@ if sys.version_info < (3, 8):  # pragma: no cover - guard for very old interpret
     sys.stderr.write("quake_listener.py requires Python 3.8 or newer.\n")
     sys.exit(1)
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 HOST_MCS = "mtalk.google.com"
 PORT_MCS = 5228
@@ -85,6 +86,11 @@ _LOG_LOCK = threading.Lock()
 
 # Set when the process should shut down (Ctrl+C / SIGTERM).
 STOP_EVENT = threading.Event()
+
+# --debug-frames: log every non-heartbeat MCS frame (tag, size, category, sender, keys).
+DEBUG_FRAMES = False
+TAG_NAMES = {0: "HeartbeatPing", 1: "HeartbeatAck", 2: "LoginRequest", 3: "LoginResponse",
+             4: "Close", 7: "IqStanza", 8: "DataMessageStanza"}
 
 
 class _ShutdownRequested(BaseException):
@@ -806,10 +812,25 @@ STATE = {
         "errors": 0,
         "last_error": None
     },
+    "emsc": {
+        "enabled": False,
+        "connected": False,
+        "events_received": 0,
+        "last_event_ts": None,
+        "connected_since": None,
+        "reconnects": 0,
+        "errors": 0,
+        "last_error": None
+    },
     "last_quake": None,
     "ultimo_sismo": None,
     "total_detections": 0
 }
+
+
+def _update_emsc_state(**kwargs):
+    with STATE_LOCK:
+        STATE["emsc"].update(kwargs)
 
 
 def _update_mcs_state(**kwargs):
@@ -849,6 +870,7 @@ def status_snapshot():
             "location": loc,
             "ubicacion": {"ciudad": loc["name"], "lat": loc["lat"], "lon": loc["lon"]},
             "google_mcs": mcs,
+            "emsc": copy.deepcopy(STATE["emsc"]),
             "last_quake": copy.deepcopy(STATE["last_quake"]),
             "ultimo_sismo": copy.deepcopy(STATE["ultimo_sismo"]),
             "total_detections": STATE["total_detections"],
@@ -921,6 +943,334 @@ def wait_for_webhooks(timeout):
         threads = list(_WEBHOOK_THREADS)
     for t in threads:
         t.join(max(0.0, deadline - time.monotonic()))
+
+
+# ==============================================================================
+# EMSC SeismicPortal real-time feed (public WebSocket push, data CC BY 4.0)
+# ==============================================================================
+# Unlike AEAS, this needs no device enrollment: EMSC pushes every new or updated
+# event worldwide, usually a few minutes after the origin time. It is a rapid
+# report, not an early warning, but it is a source that reliably delivers.
+
+EMSC_HOST = "www.seismicportal.eu"
+EMSC_PATH = "/standing_order/websocket"
+EMSC_MAX_EVENT_AGE_S = 15 * 60   # the feed also re-sends updates of old events
+EMSC_PING_EVERY_S = 60
+EMSC_SILENCE_LIMIT_S = 180
+_WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+
+class MiniWebSocket:
+    """Just enough RFC 6455 to follow a text feed over TLS: handshake, frames,
+    fragmentation, ping/pong and close. Client frames are masked as required."""
+
+    def __init__(self, host, path, timeout=CONNECT_TIMEOUT_S):
+        raw = socket.create_connection((host, 443), timeout=timeout)
+        try:
+            raw.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            self.sock = ssl.create_default_context().wrap_socket(raw, server_hostname=host)
+        except BaseException:
+            raw.close()
+            raise
+        self._buf = bytearray()
+        self._frag = []
+        self.last_rx = time.monotonic()
+        try:
+            key = base64.b64encode(os.urandom(16)).decode()
+            self.sock.sendall((
+                f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\n"
+                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+                f"Sec-WebSocket-Version: 13\r\nUser-Agent: QuakeListener/{__version__}\r\n\r\n"
+            ).encode())
+            lines = self._read_head().split("\r\n")
+            status = lines[0].split()
+            if len(status) < 2 or status[1] != "101":
+                raise ConnectionError(f"WebSocket upgrade refused: {lines[0][:80]}")
+            expected = base64.b64encode(hashlib.sha1((key + _WS_GUID).encode()).digest()).decode()
+            accept = next((l.split(":", 1)[1].strip() for l in lines[1:]
+                           if l.lower().startswith("sec-websocket-accept:")), None)
+            if accept != expected:
+                raise ConnectionError("WebSocket handshake failed (bad Sec-WebSocket-Accept)")
+            self.sock.settimeout(1.0)
+        except BaseException:
+            self.close()
+            raise
+
+    def _fill(self):
+        try:
+            chunk = self.sock.recv(65536)
+        except (socket.timeout, ssl.SSLWantReadError):
+            return False
+        if not chunk:
+            raise ConnectionResetError("WebSocket closed by remote peer.")
+        self._buf.extend(chunk)
+        self.last_rx = time.monotonic()
+        return True
+
+    def _read_head(self):
+        while b"\r\n\r\n" not in self._buf:
+            if len(self._buf) > 16384:
+                raise ConnectionError("WebSocket handshake response too large")
+            if not self._fill():
+                raise socket.timeout("Timed out waiting for WebSocket handshake")
+        end = self._buf.index(b"\r\n\r\n")
+        head = bytes(self._buf[:end]).decode("latin1")
+        del self._buf[:end + 4]
+        return head
+
+    def _parse_frame(self):
+        """Pop one complete frame as (fin, opcode, payload), or None if incomplete."""
+        b = self._buf
+        if len(b) < 2:
+            return None
+        fin, op = bool(b[0] & 0x80), b[0] & 0x0F
+        masked, n = b[1] & 0x80, b[1] & 0x7F
+        pos = 2
+        if n == 126:
+            if len(b) < 4:
+                return None
+            n, pos = struct.unpack(">H", bytes(b[2:4]))[0], 4
+        elif n == 127:
+            if len(b) < 10:
+                return None
+            n, pos = struct.unpack(">Q", bytes(b[2:10]))[0], 10
+        if n > MAX_PACKET_SIZE:
+            raise ConnectionError(f"WebSocket frame too large ({n} bytes)")
+        mask = None
+        if masked:
+            if len(b) < pos + 4:
+                return None
+            mask, pos = bytes(b[pos:pos + 4]), pos + 4
+        if len(b) < pos + n:
+            return None
+        data = bytes(b[pos:pos + n])
+        del b[:pos + n]
+        if mask:
+            data = bytes(x ^ mask[i % 4] for i, x in enumerate(data))
+        return fin, op, data
+
+    def _send(self, op, data=b""):
+        mask = os.urandom(4)
+        n = len(data)
+        if n < 126:
+            head = bytes([0x80 | op, 0x80 | n])
+        elif n < 65536:
+            head = bytes([0x80 | op, 0x80 | 126]) + struct.pack(">H", n)
+        else:
+            head = bytes([0x80 | op, 0x80 | 127]) + struct.pack(">Q", n)
+        self.sock.sendall(head + mask + bytes(x ^ mask[i % 4] for i, x in enumerate(data)))
+
+    def recv_message(self):
+        """Next complete text/binary message as str, or None if nothing arrived for ~1 s."""
+        while True:
+            frame = self._parse_frame()
+            if frame is None:
+                if not self._fill():
+                    return None
+                continue
+            fin, op, data = frame
+            if op == 0x9:            # ping -> pong
+                self._send(0xA, data)
+                continue
+            if op == 0xA:            # pong
+                continue
+            if op == 0x8:            # close
+                code = struct.unpack(">H", data[:2])[0] if len(data) >= 2 else None
+                raise ConnectionResetError(f"Server closed the WebSocket (code {code})")
+            if op in (0x1, 0x2):
+                self._frag = [data]
+            elif op == 0x0 and self._frag:
+                self._frag.append(data)
+            else:
+                continue
+            if fin:
+                msg, self._frag = b"".join(self._frag), []
+                return msg.decode("utf-8", errors="replace")
+
+    def ping(self):
+        self._send(0x9, b"quake")
+
+    def close(self):
+        sock, self.sock = getattr(self, "sock", None), None
+        if sock is None:
+            return
+        try:
+            sock.settimeout(1.0)
+            mask = os.urandom(4)
+            sock.sendall(bytes([0x88, 0x82]) + mask + bytes(x ^ mask[i % 4] for i, x in enumerate(b"\x03\xe8")))
+        except (OSError, ValueError):
+            pass
+        try:
+            sock.close()
+        except OSError:
+            pass
+
+
+def _parse_iso_utc(ts):
+    """'2026-01-01T00:00:00.123Z' -> epoch seconds (Python 3.8-safe), or None."""
+    if not ts:
+        return None
+    s = str(ts).strip()
+    if s.endswith("Z"):
+        s = s[:-1]
+    s = s.split("+")[0]
+    if "." in s:
+        whole, frac = s.split(".", 1)
+        s = f"{whole}.{(frac + '000000')[:6]}"
+    try:
+        d = dt.datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f" if "." in s else "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+    return d.replace(tzinfo=dt.timezone.utc).timestamp()
+
+
+def emsc_event_from_message(text):
+    """Flatten one SeismicPortal message, or None if it is not a usable event."""
+    try:
+        msg = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(msg, dict):
+        return None
+    props = (msg.get("data") or {}).get("properties") or {}
+    try:
+        lat, lon, mag = float(props["lat"]), float(props["lon"]), float(props["mag"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0) or math.isnan(mag):
+        return None
+    try:
+        depth = round(float(props.get("depth")), 1)
+    except (TypeError, ValueError):
+        depth = None
+    region = str(props.get("flynn_region") or "").strip().title() or None
+    return {
+        "action": str(msg.get("action") or "update"),
+        "unid": str(props.get("unid") or f"{lat:.3f},{lon:.3f},{props.get('time')}"),
+        "magnitude": round(mag, 1),
+        "magtype": props.get("magtype"),
+        "lat": lat,
+        "lon": lon,
+        "depth_km": depth,
+        "region": region,
+        "time": props.get("time"),
+        "authority": props.get("auth"),
+    }
+
+
+def build_emsc_payload(ev, dist_km, age_s, base_name):
+    """Webhook / REST payload for an EMSC event (same core fields as AEAS alerts)."""
+    mag = ev["magnitude"]
+    level = "alert" if mag >= 4.5 else "notice"
+    region = ev["region"] or f"{ev['lat']:.2f}, {ev['lon']:.2f}"
+    place = f"M{mag} {region}, {dist_km} km from {base_name}"
+    now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return {
+        "level": level,
+        "nivel": "alerta" if level == "alert" else "aviso",
+        "source": "EMSC SeismicPortal",
+        "id": f"emsc-{ev['unid']}",
+        "magnitude": mag,
+        "magnitud": mag,
+        "magnitude_type": ev.get("magtype"),
+        "distance_km": dist_km,
+        "distancia_km": dist_km,
+        "lat": ev["lat"],
+        "lon": ev["lon"],
+        "depth_km": ev.get("depth_km"),
+        "radius_km": None,
+        "region": ev["region"],
+        "place": place,
+        "lugar": place,
+        "event_time": ev.get("time"),
+        "report_delay_s": round(age_s) if age_s is not None else None,
+        "timestamp": now_str,
+        "hora_local": now_str,
+        "status": "rapid report",
+        "url": f"https://www.seismicportal.eu/eventdetails.html?unid={urllib.parse.quote(ev['unid'])}",
+    }
+
+
+class EMSCFeed(threading.Thread):
+    """Follows the EMSC WebSocket and reports events near the base station."""
+
+    def __init__(self, args, on_detection):
+        super().__init__(name="emsc-feed", daemon=True)
+        self.args = args
+        self.on_detection = on_detection
+        self.dispatched = collections.OrderedDict()  # unid -> magnitude already reported
+
+    def handle(self, text):
+        ev = emsc_event_from_message(text)
+        if ev is None:
+            return
+        a = self.args
+        with STATE_LOCK:
+            STATE["emsc"]["events_received"] += 1
+            STATE["emsc"]["last_event_ts"] = time.time()
+        dist = round(haversine_distance(a.lat, a.lon, ev["lat"], ev["lon"]), 1)
+        t = _parse_iso_utc(ev["time"])
+        age = time.time() - t if t is not None else None
+        near = dist <= a.emsc_radius_km
+        if near or ev["magnitude"] >= 5.0:
+            where = ev["region"] or f"{ev['lat']:.2f}, {ev['lon']:.2f}"
+            log(f"EMSC {ev['action']}: M{ev['magnitude']} {where}, depth {ev['depth_km']} km, "
+                f"{dist:.0f} km from {a.name}")
+        if not near or ev["magnitude"] < a.emsc_min_mag:
+            return
+        if age is not None and age > EMSC_MAX_EVENT_AGE_S:
+            log(f"EMSC: update of an event from {int(age // 60)} min ago, not dispatched")
+            return
+        prev = self.dispatched.get(ev["unid"])
+        if prev is not None and ev["magnitude"] < prev + 0.5:
+            return  # already reported; only re-report a big magnitude revision
+        self.dispatched[ev["unid"]] = ev["magnitude"]
+        while len(self.dispatched) > 500:
+            self.dispatched.popitem(last=False)
+        self.on_detection(build_emsc_payload(ev, dist, age, a.name))
+
+    def run(self):
+        backoff = BACKOFF_MIN_S
+        while not STOP_EVENT.is_set():
+            ws, started, reason = None, None, "connection closed"
+            try:
+                ws = MiniWebSocket(EMSC_HOST, EMSC_PATH)
+                started = time.monotonic()
+                _update_emsc_state(connected=True, connected_since=time.time())
+                log(f"Connected to EMSC real-time feed (wss://{EMSC_HOST}{EMSC_PATH})")
+                last_ping = time.monotonic()
+                while not STOP_EVENT.is_set():
+                    text = ws.recv_message()
+                    if text is not None:
+                        try:
+                            self.handle(text)
+                        except Exception as e:  # one bad event must not drop the feed
+                            log(f"EMSC: skipped an event that could not be processed: {e}")
+                    now = time.monotonic()
+                    if now - last_ping >= EMSC_PING_EVERY_S:
+                        ws.ping()
+                        last_ping = now
+                    if now - ws.last_rx > EMSC_SILENCE_LIMIT_S:
+                        raise ConnectionError(f"EMSC feed silent for {EMSC_SILENCE_LIMIT_S} s")
+            except Exception as e:
+                reason = str(e) or e.__class__.__name__
+                with STATE_LOCK:
+                    STATE["emsc"]["errors"] += 1
+                    STATE["emsc"]["last_error"] = reason
+            finally:
+                if ws is not None:
+                    ws.close()
+                _update_emsc_state(connected=False)
+            if STOP_EVENT.is_set():
+                break
+            if started is not None and time.monotonic() - started >= STABLE_SESSION_S:
+                backoff = BACKOFF_MIN_S
+            delay = round(backoff + random.uniform(0, backoff * 0.25), 1)
+            log(f"EMSC feed: {reason}. Reconnecting in {delay}s...")
+            with STATE_LOCK:
+                STATE["emsc"]["reconnects"] += 1
+            STOP_EVENT.wait(delay)
+            backoff = min(backoff * 2, BACKOFF_MAX_S)
 
 
 def _is_loopback_origin(origin):
@@ -1190,6 +1540,37 @@ def _install_signal_handlers():
             pass  # not in main thread / unsupported on this platform
 
 
+def describe_frame(tag, payload):
+    """One-line summary of an MCS frame for --debug-frames (no payload bodies)."""
+    name = TAG_NAMES.get(tag, f"tag{tag}")
+    parts = [f"{name} {len(payload)}B"]
+    try:
+        f = parse_protobuf(payload)
+        if tag == TAG_DATA_MESSAGE_STANZA:
+            # DataMessageStanza: 3 from, 4 to, 5 category, 7 app_data{1 key, 2 value}, 9 persistent_id
+            for label, num in (("from", 3), ("category", 5), ("pid", 9)):
+                v = _pb_text(f, num, default=None, encoding="latin1")
+                if v:
+                    parts.append(f"{label}={v[:60]}")
+            keys = [_pb_text(parse_protobuf(b), 1, default="?") for w, b in f.get(7, []) if w == 2]
+            if keys:
+                parts.append(f"app_data={keys[:12]}")
+            raw = _pb_bytes(f, 21)
+            if raw:
+                parts.append(f"raw_data={len(raw)}B")
+        elif tag == TAG_IQ_STANZA:
+            # IqStanza: 2 type, 3 id, 7 extension{1 id, 2 data}
+            iq_type = _pb_first(f, 2)[1] if 2 in f else None
+            ext = _pb_bytes(f, 7)
+            ext_id = _pb_first(parse_protobuf(ext), 1)[1] if ext else None
+            parts.append(f"type={iq_type} extension={ext_id}")
+        elif tag == TAG_CLOSE:
+            parts.append("server close")
+    except Exception as e:  # diagnostics must never break the session
+        parts.append(f"(unparsed: {e})")
+    return " ".join(parts)
+
+
 def _handle_data_message(client, payload, dispatch_alert):
     client.messages_received += 1
     stanza = parse_protobuf(payload)
@@ -1215,6 +1596,8 @@ def _run_session(client, dispatch_alert):
         if frame is not None:
             tag, payload = frame
             client.last_packet_ts = time.time()
+            if DEBUG_FRAMES and tag not in (TAG_HEARTBEAT_PING, TAG_HEARTBEAT_ACK):
+                log(f"[frame] {describe_frame(tag, payload)}")
 
             if tag == TAG_HEARTBEAT_PING:
                 client.send_pong()
@@ -1266,15 +1649,18 @@ def run_listener(args):
         except OSError as e:
             log(f"Warning: Could not start HTTP server on {args.http_host}:{args.http_port}: {e}")
 
-    def dispatch_alert(ev):
-        payload = build_alert_payload(ev, args.name, args.lat, args.lon)
+    def record_detection(payload):
         with STATE_LOCK:
             STATE["last_quake"] = payload
             STATE["ultimo_sismo"] = payload
             STATE["total_detections"] += 1
-        log(f"🚨 EARTHQUAKE ALERT DETECTED! {payload['place']} (Level: {payload['level']})")
+        log(f"🚨 EARTHQUAKE ALERT DETECTED! {payload['place']} "
+            f"(Level: {payload['level']}, source: {payload['source']})")
         if args.webhook_url:
             dispatch_webhook_async(payload)
+
+    def dispatch_alert(ev):
+        record_detection(build_alert_payload(ev, args.name, args.lat, args.lon))
 
     log(f"Starting Quake MCS Listener v{__version__} at {args.name} ({args.lat}, {args.lon})")
     if not 30 <= args.ping_interval <= 600:
@@ -1282,6 +1668,14 @@ def run_listener(args):
     log(f"Ping interval: {max(30, min(args.ping_interval, 600))}s | "
         f"Webhook: {redact_url(args.webhook_url) if args.webhook_url else 'Disabled'}"
         f"{' (HMAC signed)' if args.webhook_url and args.webhook_secret else ''}")
+
+    if not args.no_emsc:
+        _update_emsc_state(enabled=True)
+        log(f"EMSC source on: events of M{args.emsc_min_mag}+ within {args.emsc_radius_km:g} km "
+            f"trigger the webhook (rapid reports, not early warnings)")
+        if args.lat == 0.0 and args.lon == 0.0:
+            log("Note: base station is at 0.0, 0.0. Set --lat/--lon so nearby EMSC events count.")
+        EMSCFeed(args, record_detection).start()
 
     client = None
     backoff = BACKOFF_MIN_S
@@ -1471,6 +1865,10 @@ def build_parser():
     parser.add_argument("--credentials-file", type=str, default=env("QUAKE_CREDENTIALS_FILE", DEFAULT_CREDENTIALS_FILE), help="Where the anonymous device identity is stored (default: ~/.quake_device_credentials.json)")
     parser.add_argument("--locale", type=str, default=env("QUAKE_LOCALE", "en_US"), help="Locale for device registration")
     parser.add_argument("--timezone", type=str, default=env("QUAKE_TIMEZONE", "UTC"), help="Timezone for device registration")
+    parser.add_argument("--no-emsc", action="store_true", default=env("QUAKE_NO_EMSC", "") not in ("", "0", "false"), help="Disable the EMSC SeismicPortal real-time feed (secondary, non-AEAS source)")
+    parser.add_argument("--emsc-min-mag", type=_float_range(0.0, 10.0, "magnitude"), default=env("QUAKE_EMSC_MIN_MAG", "4.0"), help="Minimum magnitude for EMSC events to trigger the webhook (default: 4.0)")
+    parser.add_argument("--emsc-radius-km", type=_float_range(1.0, 20040.0, "radius"), default=env("QUAKE_EMSC_RADIUS_KM", "300"), help="Only EMSC events within this distance of the base station trigger the webhook (default: 300)")
+    parser.add_argument("--debug-frames", action="store_true", default=env("QUAKE_DEBUG_FRAMES", "") not in ("", "0", "false"), help="Log a one-line summary of every non-heartbeat MCS frame (for protocol research)")
     parser.add_argument("--test-ping", action="store_true", help="Perform a single diagnostic TLS ping and exit")
     parser.add_argument("--simulate", action="store_true", help="Test internal Protobuf event decoding")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -1478,8 +1876,9 @@ def build_parser():
 
 
 def main():
-    global CREDENTIALS_FILE, ALLOWED_ORIGINS, ALLOWED_HOSTS
+    global CREDENTIALS_FILE, ALLOWED_ORIGINS, ALLOWED_HOSTS, DEBUG_FRAMES
     args = build_parser().parse_args()
+    DEBUG_FRAMES = args.debug_frames
     CREDENTIALS_FILE = os.path.abspath(os.path.expanduser(args.credentials_file))
     ALLOWED_ORIGINS = args.allowed_origins
     ALLOWED_HOSTS = args.allowed_hosts
