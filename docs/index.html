@@ -2,836 +2,1643 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Quake MCS Listener • Autonomous AEAS Earthquake Alert Receiver</title>
-  <meta name="description" content="Lightweight standard Python client for receiving real-time earthquake alerts from the Android Earthquake Alerts System via MCS. Home Assistant compatible.">
-  <link rel="icon" type="image/svg+xml" href="logo.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quake MCS Listener — earthquake alerts for Home Assistant</title>
+  <meta name="description" content="A single Python file that listens to the Android Earthquake Alerts push channel and turns alerts into Home Assistant webhooks. Zero dependencies, under 15 MB of RAM.">
+  <meta name="theme-color" content="#030712">
+  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="apple-touch-icon" href="icon-180.png">
 
-  <!-- Leaflet CSS & JS (100% Free & Open Source) -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Quake MCS Listener">
+  <meta property="og:description" content="Earthquake early-warning pushes, straight into Home Assistant. Pure Python, zero dependencies, under 15 MB of RAM.">
+  <meta property="og:url" content="https://juanipis.github.io/quake-alert-listener/">
+  <meta property="og:image" content="https://juanipis.github.io/quake-alert-listener/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
 
   <style>
     :root {
       color-scheme: dark;
-      --bg-main: #070a13;
-      --bg-card: rgba(15, 23, 42, 0.94);
-      --border-color: rgba(255, 255, 255, 0.08);
-      --accent-blue: #38bdf8;
-      --accent-green: #22c55e;
-      --accent-yellow: #eab308;
-      --accent-red: #ef4444;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
+      --bg: #030712;
+      --bg-2: #0a0f1d;
+      --panel-top: rgba(17, 25, 44, 0.66);
+      --panel-bot: rgba(8, 13, 26, 0.62);
+      --well: #050913;
+      --line: rgba(148, 163, 184, 0.10);
+      --line-2: rgba(148, 163, 184, 0.17);
+      --line-3: rgba(148, 163, 184, 0.28);
+      --cyan: #38bdf8;
+      --cyan-soft: rgba(56, 189, 248, 0.12);
+      --green: #22c55e;
+      --green-soft: rgba(34, 197, 94, 0.12);
+      --amber: #eab308;
+      --amber-soft: rgba(234, 179, 8, 0.12);
+      --red: #ef4444;
+      --red-soft: rgba(239, 68, 68, 0.14);
+      --text: #e6e9ef;
+      --muted: #8a94a6;
+      --dim: #5a6478;
+      --sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      --r: 16px;
+      --r-sm: 10px;
+      --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+      --wrap: 1200px;
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg-main);
-      color: var(--text-main);
-      line-height: 1.5;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
-    header {
-      background: rgba(15, 23, 42, 0.96);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border-color);
-      padding: 1rem 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 1rem;
-      position: sticky;
-      top: 0;
-      z-index: 1000;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 0.8rem;
-    }
-    .badge-status {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.45rem;
-      font-size: 0.75rem;
-      font-weight: 700;
-      padding: 0.35rem 0.85rem;
-      border-radius: 9999px;
-      transition: all 0.3s ease;
-    }
-    .badge-sim {
-      background: rgba(234, 179, 8, 0.15);
-      color: var(--accent-yellow);
-      border: 1px solid rgba(234, 179, 8, 0.3);
-    }
-    .badge-live {
-      background: rgba(34, 197, 94, 0.18);
-      color: var(--accent-green);
-      border: 1px solid rgba(34, 197, 94, 0.4);
-      box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
-    }
-    .dot-pulse {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-      animation: pulse 1.8s infinite;
-    }
-    @keyframes pulse {
-      0% { transform: scale(0.95); opacity: 0.8; }
-      50% { transform: scale(1.15); opacity: 1; }
-      100% { transform: scale(0.95); opacity: 0.8; }
-    }
+    a { color: inherit; text-decoration: none; }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    input { font: inherit; color: inherit; }
+    svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    :focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 6px; }
+    ::selection { background: rgba(56, 189, 248, 0.3); }
 
-    /* Community Call & Disclaimer Banner */
-    .community-banner {
-      background: linear-gradient(90deg, rgba(234, 179, 8, 0.12), rgba(249, 115, 22, 0.12));
-      border-bottom: 1px solid rgba(234, 179, 8, 0.25);
-      color: #fef08a;
-      padding: 0.85rem 2rem;
-      font-size: 0.85rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      justify-content: space-between;
-      flex-wrap: wrap;
-    }
-    .community-banner b { color: #fff; }
+    .wrap { width: 100%; max-width: var(--wrap); margin: 0 auto; padding: 0 24px; }
+    .mono { font-family: var(--mono); }
 
-    /* Alert Banner */
-    #alert-banner {
-      display: none;
-      background: linear-gradient(90deg, #dc2626, #b91c1c);
-      color: #fff;
-      padding: 0.85rem 1.5rem;
-      font-weight: 700;
-      font-size: 1rem;
-      text-align: center;
-      animation: alertBlink 1s infinite alternate;
-      border-bottom: 2px solid #fff;
+    /* ---------- Backdrop: graph paper + faint aurora ---------- */
+    .backdrop {
+      position: fixed; inset: 0; z-index: -1; pointer-events: none;
+      background:
+        radial-gradient(1000px 560px at 78% -12%, rgba(56, 189, 248, 0.11), transparent 62%),
+        radial-gradient(760px 520px at -8% 28%, rgba(34, 197, 94, 0.05), transparent 60%),
+        linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 55%, var(--bg) 100%);
     }
-    @keyframes alertBlink {
-      from { opacity: 0.9; }
-      to { opacity: 1; filter: brightness(1.2); }
+    .backdrop::before {
+      content: ""; position: absolute; inset: 0;
+      background-image:
+        linear-gradient(rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+      background-size: 56px 56px;
+      -webkit-mask-image: radial-gradient(ellipse 85% 55% at 50% 0%, #000 25%, transparent 78%);
+              mask-image: radial-gradient(ellipse 85% 55% at 50% 0%, #000 25%, transparent 78%);
     }
+    body.is-alerting .backdrop::after {
+      content: ""; position: absolute; inset: 0;
+      box-shadow: inset 0 0 160px rgba(239, 68, 68, 0.28);
+      animation: vignette 1.1s ease-in-out infinite alternate;
+    }
+    @keyframes vignette { from { opacity: 0.45; } to { opacity: 1; } }
 
-    main {
-      flex: 1;
-      max-width: 1350px;
-      margin: 0 auto;
-      padding: 2rem;
-      width: 100%;
-      display: flex;
-      flex-direction: column;
-      gap: 1.75rem;
-    }
-
-    .hero {
-      text-align: center;
-      max-width: 850px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-    .hero h1 {
-      font-size: 2.2rem;
-      font-weight: 800;
-      letter-spacing: -0.03em;
-      line-height: 1.2;
-    }
-    .hero h1 span {
-      background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-    }
-    .hero p {
-      font-size: 1.05rem;
-      color: var(--text-muted);
-    }
-    .badges-row {
-      display: flex;
-      gap: 0.6rem;
-      justify-content: center;
-      flex-wrap: wrap;
-      margin-top: 0.25rem;
-    }
-    .pill {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-color);
-      padding: 0.35rem 0.8rem;
-      border-radius: 9999px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      color: var(--text-muted);
-    }
-
-    /* Zero-Install Bridge Bar */
-    .bridge-panel {
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(56, 189, 248, 0.25);
-      border-radius: 12px;
-      padding: 1.25rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    }
-    .bridge-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-    }
-    .bridge-title {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      font-size: 1rem;
-      font-weight: 700;
-    }
-    .tabs-row {
-      display: flex;
-      gap: 0.4rem;
-      flex-wrap: wrap;
-    }
-    .tab-btn {
-      background: rgba(255, 255, 255, 0.05);
-      border: 1px solid var(--border-color);
-      color: var(--text-muted);
-      padding: 0.4rem 0.85rem;
-      border-radius: 6px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .tab-btn.active {
-      background: #2563eb;
-      color: #fff;
-      border-color: #3b82f6;
-    }
-    .bridge-code-box {
-      background: #040711;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 0.85rem 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 1rem;
-      font-family: ui-monospace, monospace;
-      font-size: 0.82rem;
-      color: var(--accent-green);
-      overflow-x: auto;
-    }
-
-    .grid-main {
-      display: grid;
-      grid-template-columns: 1fr 440px;
-      gap: 1.75rem;
-    }
-    @media (max-width: 1024px) {
-      .grid-main { grid-template-columns: 1fr; }
-    }
-
+    /* ---------- Glass card ---------- */
     .card {
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 14px;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
+      position: relative;
+      background: linear-gradient(180deg, var(--panel-top), var(--panel-bot));
+      border: 1px solid var(--line-2);
+      border-radius: var(--r);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+              backdrop-filter: blur(16px) saturate(140%);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.045) inset, 0 24px 48px -28px rgba(0, 0, 0, 0.75);
+      display: flex; flex-direction: column;
+      min-width: 0;
     }
-    .card-header {
-      padding: 1rem 1.25rem;
-      background: rgba(255, 255, 255, 0.02);
-      border-bottom: 1px solid var(--border-color);
-      font-size: 0.9rem;
-      font-weight: 700;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 0.5rem;
+    .card::before {
+      content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 1px; pointer-events: none;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.42), transparent 32%, transparent 68%, rgba(34, 197, 94, 0.3));
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor; mask-composite: exclude;
+      opacity: 0.45; transition: opacity 0.4s var(--ease);
     }
-    #map {
-      height: 480px;
-      width: 100%;
-      background: #0b1120;
+    .card:hover::before { opacity: 0.95; }
+    /* registration marks, like the crop ticks on a chart recorder */
+    .reg::after {
+      content: ""; position: absolute; inset: -6px; pointer-events: none;
+      --c: rgba(56, 189, 248, 0.5); --l: 9px;
+      background:
+        linear-gradient(var(--c), var(--c)) top left / var(--l) 1px no-repeat,
+        linear-gradient(var(--c), var(--c)) top left / 1px var(--l) no-repeat,
+        linear-gradient(var(--c), var(--c)) top right / var(--l) 1px no-repeat,
+        linear-gradient(var(--c), var(--c)) top right / 1px var(--l) no-repeat,
+        linear-gradient(var(--c), var(--c)) bottom left / var(--l) 1px no-repeat,
+        linear-gradient(var(--c), var(--c)) bottom left / 1px var(--l) no-repeat,
+        linear-gradient(var(--c), var(--c)) bottom right / var(--l) 1px no-repeat,
+        linear-gradient(var(--c), var(--c)) bottom right / 1px var(--l) no-repeat;
+      transition: inset 0.35s var(--ease);
     }
-    #map .leaflet-tile {
-      filter: invert(100%) hue-rotate(180deg) brightness(85%) contrast(90%);
+    .reg:hover::after { inset: -4px; }
+    .card-h {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 16px 12px; border-bottom: 1px solid var(--line);
+      min-height: 50px; flex-wrap: wrap;
+    }
+    .label {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: var(--mono); font-size: 11px; font-weight: 500;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+    }
+    .label svg.i { width: 14px; height: 14px; color: var(--cyan); }
+    .card-b { padding: 16px; }
+
+    /* ---------- Chips / LEDs ---------- */
+    .chip {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.02em;
+      padding: 4px 10px; border-radius: 999px;
+      border: 1px solid var(--line-2); color: var(--muted); background: rgba(255, 255, 255, 0.02);
+      white-space: nowrap; transition: color 0.3s, border-color 0.3s, background 0.3s;
+    }
+    .chip[data-tone="amber"] { color: var(--amber); border-color: rgba(234, 179, 8, 0.3); background: var(--amber-soft); }
+    .chip[data-tone="green"] { color: var(--green); border-color: rgba(34, 197, 94, 0.35); background: var(--green-soft); }
+    .chip[data-tone="cyan"]  { color: var(--cyan);  border-color: rgba(56, 189, 248, 0.3); background: var(--cyan-soft); }
+    .chip[data-tone="red"]   { color: #fca5a5;      border-color: rgba(239, 68, 68, 0.4); background: var(--red-soft); }
+    .led { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 0 currentColor; flex: none; }
+    .chip[data-tone="green"] .led, .chip[data-tone="amber"] .led { animation: led 2s ease-out infinite; }
+    @keyframes led {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 60%, transparent); }
+      70%, 100% { box-shadow: 0 0 0 6px transparent; }
     }
 
-    .sidebar {
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-
-    /* Terminal Box */
-    .terminal-box {
-      background: #040711;
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      padding: 1rem;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      font-size: 0.78rem;
-      color: #38bdf8;
-      height: 230px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-    }
-    .term-line { display: flex; gap: 0.5rem; }
-    .term-time { color: var(--text-muted); }
-    .term-ok { color: var(--accent-green); }
-    .term-data { color: #f8fafc; }
-    .term-warn { color: var(--accent-yellow); }
-
+    /* ---------- Buttons ---------- */
     .btn {
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      padding: 0.55rem 1rem;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 0.82rem;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.4rem;
-      transition: background 0.2s;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      height: 38px; padding: 0 16px; border-radius: 10px;
+      font-size: 14px; font-weight: 500; white-space: nowrap;
+      transition: transform 0.12s var(--ease), background 0.2s, border-color 0.2s, box-shadow 0.2s;
     }
-    .btn:hover { background: #1d4ed8; }
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.08);
-      color: var(--text-main);
-      border: 1px solid var(--border-color);
+    .btn:active { transform: translateY(1px) scale(0.985); }
+    .btn-primary {
+      background: linear-gradient(180deg, #f1f5f9, #cbd5e1); color: #050913;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset, 0 8px 22px -10px rgba(56, 189, 248, 0.55);
     }
-    .btn-secondary:hover { background: rgba(255, 255, 255, 0.14); }
-    .btn-success { background: #16a34a; }
-    .btn-success:hover { background: #15803d; }
+    .btn-primary:hover { background: linear-gradient(180deg, #fff, #e2e8f0); }
+    .btn-ghost { border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.025); color: var(--text); }
+    .btn-ghost:hover { border-color: var(--line-3); background: rgba(255, 255, 255, 0.05); }
+    .icon-btn {
+      position: relative; width: 30px; height: 30px; border-radius: 8px;
+      display: inline-grid; place-items: center; color: var(--muted);
+      border: 1px solid transparent; transition: color 0.2s, background 0.2s, border-color 0.2s, transform 0.1s;
+    }
+    .icon-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); border-color: var(--line); }
+    .icon-btn:active { transform: scale(0.92); }
+    .icon-btn[aria-pressed="true"] { color: var(--amber); }
 
-    .telemetry-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.75rem;
-      padding: 1rem;
-    }
-    .tel-item {
-      background: rgba(255, 255, 255, 0.02);
-      border: 1px solid var(--border-color);
-      padding: 0.75rem;
-      border-radius: 8px;
-    }
-    .tel-label { font-size: 0.72rem; color: var(--text-muted); }
-    .tel-val { font-size: 0.95rem; font-weight: 700; margin-top: 0.2rem; }
+    /* copy button: swaps copy icon for a check */
+    .copy .i-check { display: none; color: var(--green); }
+    .copy.is-done .i-copy { display: none; }
+    .copy.is-done .i-check { display: block; animation: pop 0.35s var(--ease); }
+    @keyframes pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
-    footer {
-      border-top: 1px solid var(--border-color);
-      padding: 2rem;
-      text-align: center;
-      font-size: 0.82rem;
-      color: var(--text-muted);
-      display: flex;
-      flex-direction: column;
-      gap: 0.6rem;
+    /* ---------- Nav ---------- */
+    .nav {
+      position: sticky; top: 0; z-index: 900;
+      background: rgba(3, 7, 18, 0.72);
+      -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--line);
+      transition: border-color 0.3s;
     }
-    footer a { color: var(--accent-blue); text-decoration: none; }
+    body.is-alerting .nav { border-bottom-color: rgba(239, 68, 68, 0.5); }
+    .nav .wrap { display: flex; align-items: center; gap: 24px; height: 60px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; }
+    .brand img { width: 28px; height: 28px; border-radius: 7px; }
+    .nav-links { display: flex; gap: 22px; margin-left: 8px; }
+    .nav-links a { font-size: 14px; color: var(--muted); transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .nav .btn { height: 34px; padding: 0 12px; font-size: 13px; }
+
+    /* ---------- Hero ---------- */
+    .hero { display: grid; grid-template-columns: minmax(0, 1.04fr) minmax(0, 1fr); gap: 56px; align-items: center; padding-top: 72px; padding-bottom: 40px; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 22px; }
+    .eyebrow .tag { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line-2); color: var(--text); }
+    h1 {
+      font-size: clamp(2.3rem, 4.2vw, 3.45rem);
+      line-height: 1.02; letter-spacing: -0.045em; font-weight: 600;
+      text-wrap: balance;
+    }
+    h1 .soft { color: #7d889c; }
+    .lede { margin-top: 20px; max-width: 34rem; font-size: 17px; color: var(--muted); text-wrap: pretty; }
+    .lede b { color: var(--text); font-weight: 500; }
+
+    .install { margin-top: 30px; padding: 6px; border-radius: 14px; }
+    .install-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 4px 8px 8px; flex-wrap: wrap; }
+    .cmd {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--well); border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 8px 10px 14px; font-family: var(--mono); font-size: 13px;
+    }
+    .cmd .prompt { color: var(--green); user-select: none; }
+    .cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: none; color: #cbd5e1; }
+    .cmd code::-webkit-scrollbar { display: none; }
+    .tok-url { color: var(--cyan); }
+    .tok-flag { color: #94a3b8; }
+    .tok-str { color: #86efac; }
+    .tok-op { color: var(--amber); }
+    .install-note { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); padding: 10px 8px 4px; }
+    .install-note svg.i { width: 14px; height: 14px; }
+
+    /* segmented control with sliding thumb */
+    .seg {
+      position: relative; display: inline-flex; padding: 3px; gap: 2px;
+      background: rgba(255, 255, 255, 0.03); border: 1px solid var(--line); border-radius: 10px;
+    }
+    .seg-thumb {
+      position: absolute; top: 3px; bottom: 3px; left: 0; width: 0; border-radius: 7px;
+      background: linear-gradient(180deg, rgba(56, 189, 248, 0.2), rgba(56, 189, 248, 0.1));
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      box-shadow: 0 0 18px -6px rgba(56, 189, 248, 0.6);
+      transform: translateX(var(--x, 0)); width: var(--w, 0);
+      transition: transform 0.32s var(--ease), width 0.32s var(--ease);
+    }
+    .seg { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .seg::-webkit-scrollbar { display: none; }
+    .seg button {
+      position: relative; flex: none; z-index: 1; padding: 5px 11px; border-radius: 7px;
+      font-size: 12.5px; font-weight: 500; color: var(--muted); transition: color 0.2s;
+    }
+    .seg button[aria-selected="true"] { color: var(--text); }
+    .seg button:hover { color: var(--text); }
+    .seg-sm button { padding: 3px 9px; font-size: 11.5px; font-family: var(--mono); }
+
+    .specs { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: 0; margin-top: 30px; }
+    .specs div { padding: 0 22px; border-left: 1px solid var(--line-2); }
+    .specs div:first-child { padding-left: 0; border-left: 0; }
+    .specs dt { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+    .specs dd { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; }
+
+    /* ---------- Seismograph ---------- */
+    .scope-hud { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+    .scope-hud > div { padding: 10px 16px; border-left: 1px solid var(--line); min-width: 0; }
+    .scope-hud > div:first-child { border-left: 0; }
+    .k { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+    .v { display: block; font-family: var(--mono); font-size: 14px; font-weight: 500; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+    .v.cyan { color: var(--cyan); } .v.green { color: var(--green); }
+    .swatch { display: inline-block; width: 14px; height: 2px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+    #scope { display: block; width: 100%; height: 300px; }
+    .scope-foot { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--dim); }
+
+    /* ---------- Sections ---------- */
+    .section { padding-top: 96px; }
+    .section-h { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; align-items: end; margin-bottom: 28px; }
+    .kicker { font-family: var(--mono); font-size: 12px; color: var(--cyan); letter-spacing: 0.04em; margin-bottom: 10px; }
+    h2 { font-size: clamp(1.8rem, 3vw, 2.5rem); line-height: 1.08; letter-spacing: -0.035em; font-weight: 600; text-wrap: balance; }
+    .section-h > p { color: var(--muted); max-width: 32rem; justify-self: end; text-wrap: pretty; }
+
+    /* ---------- Bento ---------- */
+    .bento { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; }
+    .b-console { grid-column: 1 / 8; grid-row: span 2; }
+    .b-stats { grid-column: 8 / 13; }
+    .b-controls { grid-column: 8 / 13; }
+    .b-map { grid-column: 1 / 8; }
+    .b-ha { grid-column: 8 / 13; }
+
+    /* console */
+    .term-tools { display: flex; align-items: center; gap: 4px; }
+    .term {
+      flex: 1; min-height: 360px; max-height: 470px; overflow-y: auto;
+      background: var(--well); margin: 12px; border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 0; font-family: var(--mono); font-size: 12.5px; line-height: 1.7;
+      scrollbar-width: thin; scrollbar-color: #1e293b transparent;
+    }
+    .ln {
+      display: grid; grid-template-columns: 66px 112px minmax(0, 1fr); gap: 10px;
+      padding: 1px 14px; animation: lnIn 0.35s var(--ease);
+    }
+    .ln:hover { background: rgba(255, 255, 255, 0.025); }
+    .ln .t { color: var(--dim); font-variant-numeric: tabular-nums; }
+    .ln .msg { color: #cbd5e1; overflow-wrap: anywhere; }
+    .ln[hidden] { display: none; }
+    @keyframes lnIn { from { opacity: 0; transform: translateY(4px); background: rgba(56, 189, 248, 0.08); } to { opacity: 1; transform: none; } }
+    .tg { justify-self: start; font-size: 11px; padding: 0 6px; border-radius: 4px; border: 1px solid; height: 19px; line-height: 17px; margin-top: 2px; white-space: nowrap; }
+    .tg-hb   { color: var(--cyan);  border-color: rgba(56, 189, 248, 0.3);  background: var(--cyan-soft); }
+    .tg-iq   { color: #a5b4fc;      border-color: rgba(165, 180, 252, 0.3); background: rgba(165, 180, 252, 0.1); }
+    .tg-data { color: var(--green); border-color: rgba(34, 197, 94, 0.32); background: var(--green-soft); }
+    .tg-sys  { color: var(--muted); border-color: var(--line-2);            background: rgba(255, 255, 255, 0.03); }
+    .tg-warn { color: var(--amber); border-color: rgba(234, 179, 8, 0.32);  background: var(--amber-soft); }
+    .tg-alert{ color: #fca5a5;      border-color: rgba(239, 68, 68, 0.45);  background: var(--red-soft); }
+    .hl-host { color: var(--cyan); }
+    .hl-num { color: var(--amber); }
+    .term-foot { display: flex; justify-content: space-between; gap: 10px; padding: 0 16px 14px; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+
+    /* stats */
+    .stats { display: grid; grid-template-columns: 1fr 1fr; }
+    .stat { padding: 14px 16px; border-top: 1px solid var(--line); min-width: 0; position: relative; }
+    .stat:nth-child(-n+2) { border-top: 0; }
+    .stat:nth-child(even) { border-left: 1px solid var(--line); }
+    .stat .big { font-size: 24px; font-weight: 600; letter-spacing: -0.03em; margin-top: 4px; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.3s; }
+    .stat .big small { font-size: 13px; color: var(--muted); font-weight: 500; margin-left: 2px; letter-spacing: 0; }
+    .stat .sub { font-size: 12px; color: var(--dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .spark { position: absolute; right: 14px; top: 16px; width: 64px; height: 22px; overflow: visible; }
+    .flash { animation: flash 0.6s var(--ease); }
+    @keyframes flash { 0% { color: var(--cyan); text-shadow: 0 0 14px rgba(56, 189, 248, 0.7); } 100% { text-shadow: none; } }
+
+    /* controls */
+    .keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px 16px 6px; }
+    .key {
+      position: relative; text-align: left; padding: 14px 12px 12px; border-radius: 12px; min-height: 104px;
+      display: flex; flex-direction: column; justify-content: space-between; gap: 10px;
+      background: linear-gradient(180deg, #141d33, #0b1222);
+      border: 1px solid var(--line-2);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.07) inset, 0 -3px 0 rgba(0, 0, 0, 0.4) inset, 0 10px 18px -12px rgba(0, 0, 0, 0.9);
+      transition: transform 0.09s ease, box-shadow 0.09s ease, border-color 0.25s, background 0.25s;
+      -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+    }
+    .key:hover { border-color: rgba(56, 189, 248, 0.35); }
+    .key:active, .key.is-down {
+      transform: translateY(2px);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 -1px 0 rgba(0, 0, 0, 0.4) inset, 0 3px 8px -6px rgba(0, 0, 0, 0.9);
+    }
+    .key svg.i { width: 20px; height: 20px; color: var(--muted); transition: color 0.2s; }
+    .key:hover svg.i { color: var(--text); }
+    .key-t { display: block; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+    .key-s { display: block; font-family: var(--mono); font-size: 11px; color: var(--dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
+    .key-led { position: absolute; top: 12px; right: 12px; width: 7px; height: 7px; border-radius: 50%; background: #1f2937; box-shadow: 0 0 0 1px rgba(255,255,255,0.06) inset; transition: background 0.15s, box-shadow 0.3s; }
+    .key.is-lit .key-led { background: var(--tone, var(--cyan)); box-shadow: 0 0 10px 1px var(--tone, var(--cyan)); }
+    .key.is-lit .key-s { color: var(--tone, var(--cyan)); }
+    .key[data-act="siren"] { --tone: var(--amber); }
+    .key[data-act="ping"] { --tone: var(--cyan); }
+    .key-red { --tone: var(--red); background: linear-gradient(180deg, #2a1218, #180a10); border-color: rgba(239, 68, 68, 0.3); }
+    .key-red:hover { border-color: rgba(239, 68, 68, 0.6); }
+    .key-red.is-armed { border-color: var(--red); animation: armed 0.7s ease-in-out infinite alternate; }
+    @keyframes armed { to { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18), 0 0 24px -4px rgba(239, 68, 68, 0.6); } }
+    .key-red svg.i { color: #fca5a5; }
+    .controls-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 16px 14px; font-size: 12px; color: var(--dim); flex-wrap: wrap; }
+    .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--muted); font-size: 12.5px; user-select: none; }
+    .switch input { position: absolute; opacity: 0; pointer-events: none; }
+    .switch .track { width: 28px; height: 16px; border-radius: 99px; background: #1e293b; border: 1px solid var(--line-2); position: relative; transition: background 0.2s; }
+    .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #94a3b8; transition: transform 0.25s var(--ease), background 0.2s; }
+    .switch input:checked + .track { background: rgba(34, 197, 94, 0.25); border-color: rgba(34, 197, 94, 0.45); }
+    .switch input:checked + .track::after { transform: translateX(12px); background: var(--green); }
+    .switch input:focus-visible + .track { outline: 2px solid var(--cyan); outline-offset: 2px; }
+
+    /* map */
+    #map { height: 300px; margin: 12px 12px 0; border-radius: 10px; border: 1px solid var(--line); background: #070b14; overflow: hidden; }
+    .leaflet-container { font-family: var(--mono); background: #070b14; }
+    .leaflet-tile-pane { filter: brightness(0.72) sepia(1) hue-rotate(178deg) saturate(2) contrast(1.05); }
+    .leaflet-control-attribution { background: rgba(3, 7, 18, 0.7) !important; color: var(--dim) !important; font-size: 10px; }
+    .leaflet-control-attribution a { color: var(--muted) !important; }
+    .leaflet-bar { border: 1px solid var(--line-2) !important; box-shadow: none !important; }
+    .leaflet-bar a { background: rgba(10, 15, 29, 0.9) !important; color: var(--muted) !important; border-color: var(--line) !important; }
+    .leaflet-bar a:hover { color: var(--text) !important; }
+    .tip { background: #0b1120; border: 1px solid var(--line-2); color: var(--text); font-family: var(--mono); font-size: 11px; border-radius: 6px; box-shadow: none; padding: 3px 8px; }
+    .tip::before { display: none; }
+    .pin { position: relative; display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--cyan); border: 2px solid #e0f2fe; box-shadow: 0 0 12px var(--cyan); }
+    .pin::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 1px solid var(--cyan); animation: ring 2.4s ease-out infinite; }
+    .pin-red { background: var(--red); border-color: #fee2e2; box-shadow: 0 0 14px var(--red); }
+    .pin-red::after { border-color: var(--red); animation-duration: 1.1s; }
+    @keyframes ring { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.2); opacity: 0; } }
+    .loc { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; padding: 12px; align-items: end; }
+    .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .field span { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+    .field input {
+      height: 34px; width: 100%; padding: 0 10px; border-radius: 8px;
+      background: var(--well); border: 1px solid var(--line-2); font-family: var(--mono); font-size: 12.5px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .field input:focus { outline: none; border-color: rgba(56, 189, 248, 0.6); box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15); }
+    .field input[aria-invalid="true"] { border-color: rgba(239, 68, 68, 0.6); }
+    .loc .btn { height: 34px; padding: 0 12px; font-size: 12.5px; }
+    .loc-note { padding: 0 14px 14px; font-size: 12px; color: var(--dim); }
+
+    /* home assistant */
+    .endpoint { display: flex; align-items: center; gap: 10px; background: var(--well); border: 1px solid var(--line); border-radius: 10px; padding: 6px 6px 6px 10px; font-family: var(--mono); font-size: 12.5px; }
+    .verb { font-size: 10.5px; font-weight: 500; color: var(--green); border: 1px solid rgba(34, 197, 94, 0.35); border-radius: 4px; padding: 0 5px; }
+    .endpoint code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    pre.yaml { margin-top: 12px; background: var(--well); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.65; overflow-x: auto; color: #cbd5e1; }
+    .y-k { color: var(--cyan); } .y-s { color: #86efac; } .y-n { color: var(--amber); } .y-c { color: var(--dim); }
+    .ha-p { color: var(--muted); font-size: 13.5px; margin-bottom: 12px; }
+    .ha-tabs { margin-bottom: 10px; }
+    pre.yaml[hidden] { display: none; }
+    pre.yaml:not([hidden]) { animation: lnIn 0.35s var(--ease); }
+    .link-arrow { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); transition: color 0.2s, gap 0.2s; }
+    .link-arrow:hover { color: var(--text); gap: 9px; }
+
+    /* ---------- How it works ---------- */
+    .race { padding: 22px 22px 18px; }
+    .lane { display: grid; grid-template-columns: 170px minmax(0, 1fr) 92px; align-items: center; gap: 16px; padding: 12px 0; }
+    .lane + .lane { border-top: 1px dashed var(--line-2); }
+    .lane-name { font-size: 14px; font-weight: 500; }
+    .lane-name small { display: block; font-family: var(--mono); font-size: 11px; color: var(--dim); font-weight: 400; }
+    .track-x { position: relative; height: 26px; }
+    .track-x::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-3); }
+    .tick { position: absolute; top: 50%; width: 1px; height: 10px; transform: translate(-50%, -50%); background: var(--line-3); }
+    .poll { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 2px; transform: translate(-50%, -50%) rotate(45deg); border: 1px solid var(--muted); background: var(--bg); }
+    .quake { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 11px; height: 11px; border-radius: 50%; background: var(--red); box-shadow: 0 0 0 4px var(--red-soft); }
+    .gap { position: absolute; top: 50%; height: 6px; transform: translateY(-50%); border-radius: 3px; transform-origin: left; }
+    .gap-amber { background: repeating-linear-gradient(90deg, rgba(234, 179, 8, 0.55) 0 6px, rgba(234, 179, 8, 0.15) 6px 10px); }
+    .gap-green { background: var(--green); box-shadow: 0 0 12px rgba(34, 197, 94, 0.6); }
+    .hit { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 13px; height: 13px; border-radius: 50%; border: 2px solid; background: var(--bg); }
+    .lane-res { font-family: var(--mono); font-size: 13px; text-align: right; }
+    .race-axis { display: grid; grid-template-columns: 170px minmax(0, 1fr) 92px; gap: 16px; font-family: var(--mono); font-size: 10.5px; color: var(--dim); padding-top: 6px; }
+    .race-axis .ax { display: flex; justify-content: space-between; }
+    .race-note { font-size: 12px; color: var(--dim); margin-top: 12px; }
+    .race.in .gap { animation: grow 1.4s var(--ease) both 0.3s; }
+    @keyframes grow { from { transform: translateY(-50%) scaleX(0); } }
+
+    .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+    .step { padding: 22px; }
+    .step-n { display: flex; align-items: center; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--dim); margin-bottom: 30px; }
+    .step-n svg.i { width: 22px; height: 22px; color: var(--cyan); }
+    .step h3 { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+    .step p { margin-top: 8px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
+    .step .meta { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
+
+    /* ---------- Status / community ---------- */
+    .status { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 32px; padding: 30px; align-items: center; }
+    .status::before { background: linear-gradient(135deg, rgba(234, 179, 8, 0.45), transparent 40%, transparent 70%, rgba(56, 189, 248, 0.3)); }
+    .status p { color: var(--muted); margin-top: 12px; max-width: 38rem; text-wrap: pretty; }
+    .checks { list-style: none; display: grid; gap: 10px; font-size: 14px; }
+    .checks li { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, 0.015); }
+    .checks .ok { color: var(--green); } .checks .wait { color: var(--amber); }
+    .checks li span:last-child { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--dim); }
+    .status-ctas { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+
+    /* ---------- Footer ---------- */
+    footer { margin-top: 110px; border-top: 1px solid var(--line); }
+    footer .wrap { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; padding-top: 36px; padding-bottom: 48px; }
+    .foot-links { display: flex; gap: 20px; font-size: 13.5px; color: var(--muted); }
+    .foot-links a:hover { color: var(--text); }
+    .legal { grid-column: 1 / -1; font-size: 12px; color: var(--dim); max-width: 52rem; }
+
+    /* ---------- Alert overlay ---------- */
+    .alert {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1200;
+      background: linear-gradient(180deg, rgba(127, 29, 29, 0.96), rgba(69, 10, 10, 0.94));
+      border-bottom: 1px solid rgba(252, 165, 165, 0.45);
+      -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+      transform: translateY(-110%); visibility: hidden;
+      transition: transform 0.45s var(--ease), visibility 0s linear 0.45s;
+    }
+    .alert.is-on { transform: none; visibility: visible; transition: transform 0.45s var(--ease); box-shadow: 0 12px 40px -10px rgba(239, 68, 68, 0.5); }
+    .alert .wrap { display: flex; align-items: center; gap: 14px; min-height: 60px; }
+    .alert-dot { width: 10px; height: 10px; border-radius: 50%; background: #fecaca; box-shadow: 0 0 0 0 rgba(254, 202, 202, 0.7); animation: alarm 0.9s ease-out infinite; flex: none; }
+    @keyframes alarm { to { box-shadow: 0 0 0 12px rgba(254, 202, 202, 0); } }
+    .alert strong { font-weight: 600; letter-spacing: -0.01em; }
+    .alert .sub { font-family: var(--mono); font-size: 12px; color: #fecaca; }
+    .alert .icon-btn { margin-left: auto; color: #fecaca; }
+    .alert-bar { height: 2px; background: rgba(254, 202, 202, 0.15); }
+    .alert-bar i { display: block; height: 100%; background: #fecaca; transform-origin: left; }
+    .alert.is-on .alert-bar i { animation: drain var(--dur, 9s) linear forwards; }
+    @keyframes drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+    /* ---------- Toast ---------- */
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; z-index: 1300; transform: translate(-50%, 16px);
+      display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 10px;
+      background: #0f172a; border: 1px solid var(--line-2); font-size: 13px; color: var(--text);
+      box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.9);
+      opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.35s var(--ease);
+    }
+    .toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+    .toast svg.i { color: var(--green); }
+
+    /* ---------- Reveal ---------- */
+    [data-reveal] { opacity: 0; transform: translateY(14px); transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }
+    [data-reveal].in { opacity: 1; transform: none; }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width: 1040px) {
+      .hero { grid-template-columns: minmax(0, 1fr); padding-top: 48px; gap: 36px; }
+      .bento > * { grid-column: 1 / -1 !important; grid-row: auto !important; }
+      .section-h { grid-template-columns: minmax(0, 1fr); }
+      .section-h > p { justify-self: start; }
+      .steps { grid-template-columns: minmax(0, 1fr); }
+      .status { grid-template-columns: minmax(0, 1fr); }
+    }
+    @media (max-width: 720px) {
+      .wrap { padding: 0 16px; }
+      .nav-links { display: none; }
+      .nav .chip { display: none; }
+      .specs { grid-template-columns: repeat(2, auto); row-gap: 16px; }
+      .specs div:nth-child(3) { padding-left: 0; border-left: 0; }
+      .scope-hud { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .scope-hud > div:nth-child(3) { border-left: 0; }
+      .scope-hud > div:nth-child(n+3) { border-top: 1px solid var(--line); }
+      #scope { height: 240px; }
+      .keys { grid-template-columns: 1fr; }
+      .key { min-height: 0; flex-direction: row; align-items: center; justify-content: flex-start; }
+      .loc { grid-template-columns: 1fr 1fr; }
+      .loc .field:first-child, .loc .btn { grid-column: 1 / -1; }
+      .ln { grid-template-columns: 60px minmax(0, 1fr); }
+      .ln .tg { grid-column: 2; grid-row: 1; }
+      .ln .msg { grid-column: 1 / -1; }
+      .lane, .race-axis { grid-template-columns: minmax(0, 1fr) 72px; }
+      .lane-name { grid-column: 1 / -1; }
+      .race-axis > span:first-child { display: none; }
+      .scope-foot > span:last-child { display: none; }
+      footer .wrap { grid-template-columns: 1fr; }
+      .status { padding: 22px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+      html { scroll-behavior: auto; }
+      [data-reveal] { opacity: 1; transform: none; }
+    }
   </style>
 </head>
 <body>
+  <!-- Icon sprite -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M2 12h4l2-4 3 9 3-13 3 11 2-3h3"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="m7 9 3 3-3 3M12.5 15H17"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="m12 13 3.5-4"/><circle cx="12" cy="13" r="1"/></symbol>
+    <symbol id="i-ping" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M8.5 15.5a5 5 0 0 1 0-7M15.5 8.5a5 5 0 0 1 0 7M5.6 18.4a9 9 0 0 1 0-12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24"><path d="M11 5 6.5 8.5H3.5v7h3L11 19z"/><path d="M15.5 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></symbol>
+    <symbol id="i-siren" viewBox="0 0 24 24"><path d="M7 18v-6a5 5 0 0 1 10 0v6"/><path d="M5 21h14a1 1 0 0 0 1-1v-1a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1zM12 2v2M4.2 5.2l1.4 1.4M19.8 5.2l-1.4 1.4"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+    <symbol id="i-locate" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.5 12 3.5l8.5 7"/><path d="M5.5 9v11h13V9"/><path d="M10 20v-5h4v5"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2l1-12M9 7V4.5h6V7"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="i-broadcast" viewBox="0 0 24 24"><path d="M12 13v8M9 21h6"/><circle cx="12" cy="10" r="2"/><path d="M8 14a5.5 5.5 0 0 1 0-8M16 6a5.5 5.5 0 0 1 0 8"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.4 3 8 7 9.5 4-1.5 7-5.1 7-9.5V6z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+  </svg>
 
-  <!-- Emergency Flash Banner -->
-  <div id="alert-banner">
-    🚨 EARTHQUAKE ALERT DETECTED!
-  </div>
+  <div class="backdrop" aria-hidden="true"></div>
 
-  <!-- Community Call & Disclaimer Banner -->
-  <div class="community-banner">
-    <div>
-      <b>🧪 Experimental Project • Community Call:</b>
-      We arrived at this lightweight, autonomous implementation in standard Python. The TLS connection, handshake, and event parser are verified; however, we are currently awaiting a real seismic event in our region to 100% validate in-the-wild dispatch. Testing from your area is warmly welcomed!
-    </div>
-    <a href="https://github.com/Juanipis/quake-alert-listener" target="_blank" class="btn btn-secondary" style="font-size:0.75rem;padding:0.3rem 0.6rem;">
-      ⭐ View on GitHub
-    </a>
-  </div>
-
-  <header>
-    <div class="brand">
-      <img src="logo.svg" alt="Quake MCS Logo" style="width:36px;height:36px;border-radius:9px;box-shadow:0 0 12px rgba(56,189,248,0.25);" />
-      <div id="main-bridge-badge" class="badge-status badge-sim">
-        <div class="dot-pulse"></div>
-        <span id="bridge-badge-text">STANDALONE WEB MODE</span>
-      </div>
+  <!-- Alert overlay -->
+  <div class="alert" id="alert" role="alert" aria-live="assertive">
+    <div class="wrap">
+      <span class="alert-dot" aria-hidden="true"></span>
       <div>
-        <h2 style="font-size:1.15rem;font-weight:800;">Quake MCS Listener</h2>
-        <p style="font-size:0.72rem;color:var(--text-muted);">Lightweight AEAS Earthquake Alert Receiver • Emulator-Free</p>
+        <strong id="alert-title">Drill</strong>
+        <div class="sub" id="alert-sub"></div>
       </div>
+      <button class="icon-btn" id="alert-close" aria-label="Dismiss alert"><svg class="i"><use href="#i-x"/></svg></button>
     </div>
-    <div style="display:flex;gap:0.6rem;align-items:center;">
-      <button class="btn btn-secondary" onclick="testWebSiren()">🔊 Test Siren & Voice</button>
-      <button class="btn btn-secondary" id="btn-live-ping" onclick="triggerPingTest()">⚡ Test MCS Ping</button>
-      <button class="btn" onclick="simulateLocalAlert()">🚨 Simulate Alert</button>
+    <div class="alert-bar"><i></i></div>
+  </div>
+
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="#top" aria-label="Quake MCS Listener, home">
+        <img src="logo.svg" alt="" width="28" height="28">
+        <span>Quake MCS Listener</span>
+      </a>
+      <nav class="nav-links" aria-label="Sections">
+        <a href="#live">Live bridge</a>
+        <a href="#how">How it works</a>
+        <a href="#ha">Home Assistant</a>
+      </nav>
+      <div class="nav-right">
+        <span class="chip" id="nav-chip" data-tone="amber"><span class="led"></span><span>Standalone</span></span>
+        <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener">
+          <svg class="i"><use href="#i-github"/></svg><span>GitHub</span>
+        </a>
+      </div>
     </div>
   </header>
 
-  <main>
-    <div class="hero">
-      <h1>Early Earthquake Warnings <span>Directly to Your Home Automation</span></h1>
-      <p>
-        Autonomous Python client (0 external dependencies) connecting directly to the MCS push protocol to deliver low-latency earthquake alerts to Home Assistant in milliseconds.
-      </p>
-      <div class="badges-row">
-        <span class="pill">🐍 Pure Python 3.8+</span>
-        <span class="pill">⚡ &lt; 15 MB RAM (0% CPU)</span>
-        <span class="pill">🏠 Home Assistant Native</span>
-        <span class="pill">🤖 Built with AGY & Gemini 3.8 Flash</span>
-        <span class="pill">⚖️ MIT License</span>
-      </div>
-    </div>
+  <main id="top">
+    <!-- Hero -->
+    <section class="wrap hero">
+      <div>
+        <p class="eyebrow"><span class="tag">MIT</span> Android Earthquake Alerts → Home Assistant</p>
+        <h1>Earthquake warnings, <span class="soft">straight into your smart home.</span></h1>
+        <p class="lede">
+          One Python file that listens on the same push channel Android phones use for earthquake alerts,
+          and turns each alert into a <b>Home Assistant webhook</b>. No emulator, no <span class="mono">pip install</span>, under 15&nbsp;MB of RAM.
+        </p>
 
-    <!-- ⚡ Zero-Install Local Bridge Panel -->
-    <div class="bridge-panel">
-      <div class="bridge-header">
-        <div class="bridge-title">
-          <span>⚡ Connect Real-Time Device Bridge</span>
-          <span id="bridge-pill" class="badge-status badge-sim" style="font-size:0.7rem;padding:0.2rem 0.6rem;">
-            Auto-scanning 127.0.0.1:8990...
-          </span>
-        </div>
-        <div class="tabs-row">
-          <button class="tab-btn active" onclick="selectTab('mac')">🍏 macOS / Linux</button>
-          <button class="tab-btn" onclick="selectTab('win')">🪟 Windows (PowerShell)</button>
-          <button class="tab-btn" onclick="selectTab('py')">🐍 Python Direct</button>
-          <button class="tab-btn" onclick="selectTab('docker')">🐳 Docker</button>
-        </div>
-      </div>
-      <p style="font-size:0.82rem;color:var(--text-muted);">
-        Run this 1-line command in your terminal. It executes in a temporary session without cloning or installing dependencies. As soon as it runs, this web page automatically connects in real time:
-      </p>
-      <div class="bridge-code-box">
-        <span id="code-snippet">curl -sSL https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/run.sh | bash</span>
-        <button class="btn btn-secondary" style="font-size:0.75rem;padding:0.35rem 0.75rem;white-space:nowrap;" onclick="copyActiveCommand()">📋 Copy Command</button>
-      </div>
-    </div>
-
-    <div class="grid-main">
-      <!-- Interactive Leaflet Map Centered on Visitor Location -->
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <span>Coverage Map at Your Location</span>
-            <span id="loc-name" style="color:var(--accent-blue);margin-left:0.5rem;font-weight:600;">Detecting...</span>
-          </div>
-          <span style="font-size:0.75rem;color:var(--text-muted);">Leaflet + OpenStreetMap (100% Free)</span>
-        </div>
-        <div id="map"></div>
-      </div>
-
-      <!-- Sidebar: Live Telemetry & MCS Stream -->
-      <div class="sidebar">
-        <!-- Live Terminal -->
-        <div class="card">
-          <div class="card-header">
-            <span id="term-header-title">MCS Stream Activity</span>
-            <span id="term-status-badge" style="font-size:0.72rem;color:var(--accent-yellow);">Simulation Mode</span>
-          </div>
-          <div style="padding:1rem;">
-            <div class="terminal-box" id="term-box">
-              <div class="term-line"><span class="term-time">[00:00:01]</span> <span class="term-warn">Auto-scanning for local bridge on http://127.0.0.1:8990...</span></div>
-              <div class="term-line"><span class="term-time">[00:00:02]</span> <span class="term-data">Simulation active. Run the 1-line command above to link your machine.</span></div>
+        <div class="install card" id="install">
+          <div class="install-top">
+            <span class="label"><svg class="i"><use href="#i-terminal"/></svg>Run the bridge</span>
+            <div class="seg" role="tablist" aria-label="Operating system" id="os-seg">
+              <span class="seg-thumb" aria-hidden="true"></span>
+              <button role="tab" data-os="mac" aria-selected="true">macOS / Linux</button>
+              <button role="tab" data-os="win" aria-selected="false">Windows</button>
+              <button role="tab" data-os="py" aria-selected="false">Python</button>
+              <button role="tab" data-os="docker" aria-selected="false">Docker</button>
             </div>
           </div>
-          <div class="telemetry-grid">
-            <div class="tel-item">
-              <div class="tel-label">BRIDGE LINK</div>
-              <div class="tel-val" id="val-link-status" style="color:var(--accent-yellow);">🟡 Standalone</div>
-            </div>
-            <div class="tel-item">
-              <div class="tel-label">MCS LATENCY</div>
-              <div class="tel-val" id="val-lat">-- ms</div>
-            </div>
-            <div class="tel-item">
-              <div class="tel-label">PINGS / PACKETS</div>
-              <div class="tel-val" id="val-pings">0</div>
-            </div>
-            <div class="tel-item">
-              <div class="tel-label">HARDWARE ID</div>
-              <div class="tel-val" id="val-hwid" style="font-size:0.8rem;color:var(--accent-blue);overflow:hidden;text-overflow:ellipsis;">Standalone</div>
-            </div>
+          <div class="cmd">
+            <span class="prompt" aria-hidden="true" id="cmd-prompt">$</span>
+            <code id="cmd-text"></code>
+            <button class="icon-btn copy" id="cmd-copy" aria-label="Copy command">
+              <svg class="i i-copy"><use href="#i-copy"/></svg><svg class="i i-check"><use href="#i-check"/></svg>
+            </button>
           </div>
+          <p class="install-note"><svg class="i"><use href="#i-shield"/></svg>Runs from a temp folder. This page finds it on <span class="mono">127.0.0.1:8990</span> by itself.</p>
         </div>
 
-        <!-- Home Assistant Info Box -->
-        <div class="card">
-          <div class="card-header">
-            <span>Home Assistant Native Ready</span>
-          </div>
-          <div style="padding:1rem;display:flex;flex-direction:column;gap:0.75rem;font-size:0.82rem;color:var(--text-muted);">
-            <p>
-              When running the local bridge, Home Assistant can directly read sensors and link state from:
-            </p>
-            <div style="background:#040711;padding:0.6rem 0.8rem;border-radius:6px;font-family:monospace;color:var(--accent-green);border:1px solid var(--border-color);">
-              http://127.0.0.1:8990/status
-            </div>
-            <p>
-              Ready-to-use YAML snippets for <a href="https://github.com/Juanipis/quake-alert-listener/tree/main/homeassistant" target="_blank">sensors, automations, and Lovelace cards</a> are included in the repository.
-            </p>
-          </div>
+        <dl class="specs">
+          <div><dt>Dependencies</dt><dd>0</dd></div>
+          <div><dt>Memory</dt><dd>&lt;15 MB</dd></div>
+          <div><dt>CPU idle</dt><dd>~0%</dd></div>
+          <div><dt>Python</dt><dd>3.8+</dd></div>
+        </dl>
+      </div>
+
+      <div class="card scope reg" aria-label="Live seismograph">
+        <div class="card-h">
+          <span class="label"><svg class="i"><use href="#i-wave"/></svg>Seismograph · MCS stream</span>
+          <span class="chip" id="scope-chip" data-tone="amber"><span class="led"></span><span>Simulated</span></span>
+        </div>
+        <div class="scope-hud">
+          <div><span class="k">CH1</span><span class="v cyan"><i class="swatch" style="background:var(--cyan)"></i>P-wave</span></div>
+          <div><span class="k">CH2</span><span class="v green" id="hud-s"><i class="swatch" style="background:currentColor"></i>S-wave</span></div>
+          <div><span class="k">Amplitude</span><span class="v" id="hud-amp">0.00</span></div>
+          <div><span class="k">Last packet</span><span class="v" id="hud-last">—</span></div>
+        </div>
+        <canvas id="scope" role="img" aria-label="Two scrolling traces, P-wave and S-wave, that jump whenever a packet arrives from Google's push server."></canvas>
+        <div class="scope-foot">
+          <span>Every packet from <span class="mono">mtalk.google.com</span> moves the needle.</span>
+          <span class="mono" id="hud-events">0 events</span>
         </div>
       </div>
-    </div>
+    </section>
+
+    <!-- Live bridge -->
+    <section class="wrap section" id="live">
+      <div class="section-h" data-reveal>
+        <div>
+          <p class="kicker">01 / Live bridge</p>
+          <h2>Everything the bridge hears, in plain sight.</h2>
+        </div>
+        <p>Without a bridge running, this page plays simulated traffic so you can poke around. Start the command above and it switches to your real MCS connection within a couple of seconds.</p>
+      </div>
+
+      <div class="bento">
+        <article class="card b-console reg" data-reveal>
+          <div class="card-h">
+            <span class="label"><svg class="i"><use href="#i-terminal"/></svg>Packet console</span>
+            <div class="seg seg-sm" role="tablist" aria-label="Filter packets" id="filter-seg">
+              <span class="seg-thumb" aria-hidden="true"></span>
+              <button role="tab" data-f="all" aria-selected="true">all</button>
+              <button role="tab" data-f="hb" aria-selected="false">heartbeat</button>
+              <button role="tab" data-f="data" aria-selected="false">data</button>
+              <button role="tab" data-f="sys" aria-selected="false">system</button>
+            </div>
+            <div class="term-tools">
+              <button class="icon-btn" id="term-pause" aria-pressed="false" aria-label="Pause autoscroll"><svg class="i"><use href="#i-pause"/></svg></button>
+              <button class="icon-btn" id="term-clear" aria-label="Clear console"><svg class="i"><use href="#i-trash"/></svg></button>
+            </div>
+          </div>
+          <div class="term" id="term" role="log" aria-live="polite" aria-label="MCS packet log"></div>
+          <div class="term-foot"><span id="term-src">source: simulated</span><span id="term-count">0 lines</span></div>
+        </article>
+
+        <article class="card b-stats" data-reveal>
+          <div class="card-h">
+            <span class="label"><svg class="i"><use href="#i-gauge"/></svg>Telemetry</span>
+            <span class="chip mono" id="tel-src">127.0.0.1:8990</span>
+          </div>
+          <div class="stats">
+            <div class="stat">
+              <span class="k">Bridge</span>
+              <div class="big" id="st-link" style="color:var(--amber)">Standalone</div>
+              <div class="sub" id="st-link-sub">scanning loopback…</div>
+            </div>
+            <div class="stat">
+              <span class="k">MCS latency</span>
+              <div class="big" id="st-lat">--<small>ms</small></div>
+              <div class="sub">TLS handshake</div>
+              <svg class="spark" viewBox="0 0 64 22" preserveAspectRatio="none" aria-hidden="true"><path id="spark" d="" fill="none" stroke="#38bdf8" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+            </div>
+            <div class="stat">
+              <span class="k">Heartbeats</span>
+              <div class="big" id="st-pings">0</div>
+              <div class="sub" id="st-msgs">0 data messages</div>
+            </div>
+            <div class="stat">
+              <span class="k">Device ID</span>
+              <div class="big mono" id="st-hwid" style="font-size:18px;padding-top:4px">—</div>
+              <div class="sub">anonymous, made locally</div>
+            </div>
+          </div>
+        </article>
+
+        <article class="card b-controls" data-reveal>
+          <div class="card-h">
+            <span class="label"><svg class="i"><use href="#i-siren"/></svg>Drill controls</span>
+            <label class="switch"><input type="checkbox" id="opt-voice" checked><span class="track"></span>Voice</label>
+          </div>
+          <div class="keys">
+            <button class="key" data-act="ping">
+              <span class="key-led"></span>
+              <svg class="i"><use href="#i-ping"/></svg>
+              <span><span class="key-t">Ping MCS</span><span class="key-s" data-idle="heartbeat → ack">heartbeat → ack</span></span>
+            </button>
+            <button class="key" data-act="siren">
+              <span class="key-led"></span>
+              <svg class="i"><use href="#i-speaker"/></svg>
+              <span><span class="key-t">Test siren</span><span class="key-s" data-idle="tone + voice">tone + voice</span></span>
+            </button>
+            <button class="key key-red" data-act="drill">
+              <span class="key-led"></span>
+              <svg class="i"><use href="#i-siren"/></svg>
+              <span><span class="key-t">Run drill</span><span class="key-s" data-idle="simulated M5.5">simulated M5.5</span></span>
+            </button>
+          </div>
+          <div class="controls-foot">
+            <span id="ctl-hint">Simulated here. With a bridge linked, Ping and Drill go through it — Drill also fires your webhook.</span>
+          </div>
+        </article>
+
+        <article class="card b-map" data-reveal>
+          <div class="card-h">
+            <span class="label"><svg class="i"><use href="#i-pin"/></svg>Coverage</span>
+            <span class="chip" id="loc-chip" data-tone="cyan">Base Station · 0.0000, 0.0000</span>
+          </div>
+          <div id="map" aria-label="World map with your base station marker"></div>
+          <form class="loc" id="loc-form" autocomplete="off">
+            <label class="field"><span>Station name</span><input id="loc-name" value="Base Station" maxlength="40" spellcheck="false"></label>
+            <label class="field"><span>Lat</span><input id="loc-lat" value="0.0" inputmode="decimal"></label>
+            <label class="field"><span>Lon</span><input id="loc-lon" value="0.0" inputmode="decimal"></label>
+            <button class="btn btn-ghost" type="button" id="loc-me"><svg class="i"><use href="#i-locate"/></svg>Use mine</button>
+          </form>
+          <p class="loc-note">Stays in your browser. It only fills in the command above, rounded to about a kilometre.</p>
+        </article>
+
+        <article class="card b-ha" id="ha" data-reveal>
+          <div class="card-h">
+            <span class="label"><svg class="i"><use href="#i-home"/></svg>Home Assistant</span>
+            <a class="link-arrow" href="https://github.com/Juanipis/quake-alert-listener/tree/main/homeassistant" target="_blank" rel="noopener">YAML snippets <svg class="i" style="width:14px;height:14px"><use href="#i-arrow"/></svg></a>
+          </div>
+          <div class="card-b">
+            <p class="ha-p">Let the bridge push to a webhook the moment an alert lands, or read it as a REST sensor.</p>
+            <div class="ha-tabs">
+              <div class="seg seg-sm" role="tablist" aria-label="Integration style" id="ha-seg">
+                <span class="seg-thumb" aria-hidden="true"></span>
+                <button role="tab" data-v="hook" aria-selected="true">webhook</button>
+                <button role="tab" data-v="rest" aria-selected="false">rest sensor</button>
+              </div>
+            </div>
+            <div class="endpoint">
+              <span class="verb" id="ha-verb">POST</span><code id="ha-url">/api/webhook/quake_alert_local</code>
+              <button class="icon-btn copy" id="ha-copy" aria-label="Copy">
+                <svg class="i i-copy"><use href="#i-copy"/></svg><svg class="i i-check"><use href="#i-check"/></svg>
+              </button>
+            </div>
+<pre class="yaml" data-v="hook"><code><span class="y-c"># automations.yaml  ·  run the bridge with --webhook-url</span>
+- <span class="y-k">alias</span>: <span class="y-s">"Earthquake early alert"</span>
+  <span class="y-k">triggers</span>:
+    - <span class="y-k">trigger</span>: webhook
+      <span class="y-k">webhook_id</span>: <span class="y-s">"quake_alert_local"</span>
+      <span class="y-k">local_only</span>: <span class="y-n">true</span>
+  <span class="y-k">actions</span>:
+    - <span class="y-k">action</span>: notify.notify
+      <span class="y-k">data</span>:
+        <span class="y-k">title</span>: <span class="y-s">"Earthquake M{{ trigger.json.magnitude }}"</span>
+        <span class="y-k">message</span>: <span class="y-s">"Drop, cover, and hold on."</span></code></pre>
+<pre class="yaml" data-v="rest" hidden><code><span class="y-c"># configuration.yaml</span>
+<span class="y-k">rest</span>:
+  - <span class="y-k">resource</span>: <span class="y-s">"http://127.0.0.1:8990/status"</span>
+    <span class="y-k">scan_interval</span>: <span class="y-n">10</span>
+    <span class="y-k">sensor</span>:
+      - <span class="y-k">name</span>: <span class="y-s">"Quake Listener Latency"</span>
+        <span class="y-k">value_template</span>: <span class="y-s">"{{ value_json.google_mcs.latency_ms }}"</span>
+        <span class="y-k">unit_of_measurement</span>: <span class="y-s">"ms"</span></code></pre>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="wrap section" id="how">
+      <div class="section-h" data-reveal>
+        <div>
+          <p class="kicker">02 / How it works</p>
+          <h2>Push, not polling.</h2>
+        </div>
+        <p>Most smart-home quake integrations ask a public API for news every 30 to 60 seconds. With seismic waves, that's often the whole warning window. This one keeps a socket open and gets told.</p>
+      </div>
+
+      <div class="card race reg" id="race" data-reveal>
+        <div class="lane">
+          <div class="lane-name">Polling an API<small>every 30 s</small></div>
+          <div class="track-x">
+            <span class="tick" style="left:0%"></span><span class="tick" style="left:50%"></span><span class="tick" style="left:100%"></span>
+            <span class="poll" style="left:0%"></span><span class="poll" style="left:50%"></span><span class="poll" style="left:100%"></span>
+            <span class="gap gap-amber" style="left:13%;width:37%"></span>
+            <span class="quake" style="left:13%"></span>
+            <span class="hit" style="left:50%;border-color:var(--amber)"></span>
+          </div>
+          <div class="lane-res" style="color:var(--amber)">+22 s</div>
+        </div>
+        <div class="lane">
+          <div class="lane-name">MCS push<small>socket stays open</small></div>
+          <div class="track-x">
+            <span class="tick" style="left:0%"></span><span class="tick" style="left:50%"></span><span class="tick" style="left:100%"></span>
+            <span class="gap gap-green" style="left:13%;width:2.5%"></span>
+            <span class="quake" style="left:13%"></span>
+            <span class="hit" style="left:15.5%;border-color:var(--green)"></span>
+          </div>
+          <div class="lane-res" style="color:var(--green)">on push</div>
+        </div>
+        <div class="race-axis"><span></span><span class="ax"><span>0 s</span><span>30 s</span><span>60 s</span></span><span></span></div>
+        <p class="race-note">Illustration with one quake at 8 s. A poller only finds out on its next request; a push lands as soon as Google sends it. For scale: P-waves travel at roughly 6 km/s, the damaging S-waves at about 3.5 km/s. The gap between them is the whole warning window.</p>
+      </div>
+
+      <div class="steps">
+        <article class="card step" data-reveal>
+          <div class="step-n"><span>01</span><svg class="i"><use href="#i-phone"/></svg></div>
+          <h3>Phones feel it first</h3>
+          <p>Android's earthquake system uses the accelerometers in millions of phones as a crowdsourced seismometer network.</p>
+          <div class="meta">crowdsourced · near real time</div>
+        </article>
+        <article class="card step" data-reveal>
+          <div class="step-n"><span>02</span><svg class="i"><use href="#i-broadcast"/></svg></div>
+          <h3>Google pushes the alert</h3>
+          <p>Alerts go out over MCS, the binary protocol behind Android push. The bridge speaks it directly: TLS, login, heartbeats, protobuf.</p>
+          <div class="meta">mtalk.google.com:5228 · TLS · MCS v41</div>
+        </article>
+        <article class="card step" data-reveal>
+          <div class="step-n"><span>03</span><svg class="i"><use href="#i-home"/></svg></div>
+          <h3>Your house reacts</h3>
+          <p>The bridge works out distance to your station and calls your webhook. Flash the lights, sound a siren, shut a valve: your automations decide.</p>
+          <div class="meta">webhook · REST :8990 · HMAC-SHA256</div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Status -->
+    <section class="wrap section">
+      <div class="card status" data-reveal>
+        <div>
+          <p class="kicker" style="color:var(--amber)">03 / Where it stands</p>
+          <h2>Honest status: experimental.</h2>
+          <p>The plumbing works: handshake, heartbeats and the alert decoder are all verified. What we haven't seen yet is a real earthquake flow through it, and you can't schedule one of those. If you live somewhere that shakes, run the bridge and tell us what you see.</p>
+          <div class="status-ctas">
+            <a class="btn btn-primary" href="https://github.com/Juanipis/quake-alert-listener/issues/new" target="_blank" rel="noopener">Report what you see</a>
+            <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Read the code</a>
+          </div>
+        </div>
+        <ul class="checks">
+          <li><svg class="i ok"><use href="#i-check"/></svg>TLS + MCS login handshake<span>verified</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Heartbeat keepalive &amp; reconnect<span>verified</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Protobuf alert decoder<span>verified</span></li>
+          <li><svg class="i wait"><use href="#i-clock"/></svg>A real quake, end to end<span>waiting</span></li>
+        </ul>
+      </div>
+    </section>
   </main>
 
   <footer>
-    <p>
-      <b>Quake MCS Listener</b> is an open-source project for home automation and civil protection.
-    </p>
-    <p>
-      Built with <a href="https://github.com" target="_blank">Google Antigravity (AGY)</a> and <b>Gemini 3.8 Flash (Thinking High)</b>.
-    </p>
-    <p style="font-size:0.75rem;color:#64748b;">
-      Legal Notice: This is an independent, unofficial client. Not affiliated with or endorsed by Google LLC. Android and Google are trademarks of their respective owners.
-    </p>
+    <div class="wrap">
+      <a class="brand" href="#top"><img src="logo.svg" alt="" width="24" height="24"><span>Quake MCS Listener</span></a>
+      <nav class="foot-links" aria-label="Footer">
+        <a href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Juanipis/quake-alert-listener/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+        <a href="https://github.com/Juanipis/quake-alert-listener/issues" target="_blank" rel="noopener">Issues</a>
+      </nav>
+      <p class="legal">
+        Independent, non-profit open-source project for home automation and civil protection research. Not affiliated with, endorsed by or sponsored by Google LLC. Android and Google are trademarks of their respective owners. Built with Google Antigravity and Gemini 3.8 Flash. Map tiles © Esri and OpenStreetMap contributors.
+      </p>
+    </div>
   </footer>
 
+  <div class="toast" id="toast" role="status" aria-live="polite"><svg class="i"><use href="#i-check"/></svg><span id="toast-text">Copied</span></div>
+
   <script>
-    // State variables
-    let userLat = 20.0;
-    let userLon = 0.0;
-    let currentCityName = "Detecting location...";
-    let activeTab = 'mac';
-    let isBridgeConnected = false;
-    let bridgeFailCount = 0;
-    let lastLogHash = "";
+  (() => {
+    'use strict';
 
-    // Web Audio Synthesizer
-    let audioCtx = null;
-    function initAudio() {
-      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (audioCtx.state === 'suspended') audioCtx.resume();
+    const $ = (s, r = document) => r.querySelector(s);
+    const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+    const RAW = 'https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main';
+    const BRIDGES = ['http://127.0.0.1:8990', 'http://localhost:8990'];
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const DEFAULT_LOC = { name: 'Base Station', lat: 0, lon: 0 };
+
+    const state = {
+      os: /Win/i.test(navigator.userAgent) ? 'win' : 'mac',
+      loc: { ...DEFAULT_LOC },
+      linked: false,
+      base: null,
+      fails: 0,
+      prev: null,
+      lastLogKey: null,
+      filter: 'all',
+      paused: false,
+      latHist: [],
+      simPings: 0,
+      suppressQuakeUntil: 0,
+    };
+
+    const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const clock = () => new Date().toTimeString().slice(0, 8);
+
+    /* ---------------- Toast & copy ---------------- */
+    let toastTimer;
+    function toast(text) {
+      $('#toast-text').textContent = text;
+      $('#toast').classList.add('is-on');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => $('#toast').classList.remove('is-on'), 1800);
     }
-    document.addEventListener('click', () => initAudio(), { once: true });
-
-    function playSiren(mag, city) {
-      initAudio();
+    async function copyText(text, btn) {
       try {
-        const now = audioCtx.currentTime;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = 'sawtooth';
+        await navigator.clipboard.writeText(text);
+      } catch {
+        const ta = Object.assign(document.createElement('textarea'), { value: text });
+        ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); } catch {}
+        ta.remove();
+      }
+      btn.classList.add('is-done');
+      setTimeout(() => btn.classList.remove('is-done'), 1600);
+      toast('Copied to clipboard');
+    }
 
-        osc.frequency.setValueAtTime(880, now);
-        osc.frequency.setValueAtTime(660, now + 0.15);
-        osc.frequency.setValueAtTime(880, now + 0.30);
-        osc.frequency.setValueAtTime(660, now + 0.45);
-        osc.frequency.setValueAtTime(880, now + 0.60);
-        osc.frequency.setValueAtTime(660, now + 0.75);
+    /* ---------------- Segmented controls ---------------- */
+    function bindSeg(root, attr, onPick) {
+      const thumb = $('.seg-thumb', root);
+      const buttons = $$('button', root);
+      const place = () => {
+        const on = buttons.find((b) => b.getAttribute('aria-selected') === 'true');
+        if (!on) return;
+        root.style.setProperty('--x', on.offsetLeft - 3 + 'px');
+        root.style.setProperty('--w', on.offsetWidth + 'px');
+        thumb.style.left = '3px';
+      };
+      buttons.forEach((b) => b.addEventListener('click', () => {
+        buttons.forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+        place();
+        onPick(b.dataset[attr]);
+      }));
+      new ResizeObserver(place).observe(root);
+      document.fonts && document.fonts.ready.then(place);
+      return { select(v) { const b = buttons.find((x) => x.dataset[attr] === v); if (b) { buttons.forEach((x) => x.setAttribute('aria-selected', String(x === b))); place(); } }, place };
+    }
 
-        gain.gain.setValueAtTime(0.35, now);
-        gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+    /* ---------------- Install command ---------------- */
+    function isDefaultLoc() {
+      const { lat, lon, name } = state.loc;
+      return lat === 0 && lon === 0 && name === DEFAULT_LOC.name;
+    }
+    function buildCommand() {
+      const { lat, lon } = state.loc;
+      const name = state.loc.name.replace(/["'`$\\]/g, '').trim() || DEFAULT_LOC.name;
+      const custom = !isDefaultLoc();
+      const la = lat.toFixed(4), lo = lon.toFixed(4);
+      switch (state.os) {
+        case 'win':
+          return custom
+            ? `& ([scriptblock]::Create((irm ${RAW}/run.ps1))) -Lat ${la} -Lon ${lo} -Name "${name}"`
+            : `irm ${RAW}/run.ps1 | iex`;
+        case 'py':
+          return `curl -sSL ${RAW}/quake_listener.py | python3 -` + (custom ? ` --lat ${la} --lon ${lo} --name "${name}"` : '');
+        case 'docker':
+          return `docker run --rm -it -p 8990:8990 python:alpine sh -c "wget -qO- ${RAW}/quake_listener.py | python3 -` + (custom ? ` --lat ${la} --lon ${lo} --name '${name}'` : '') + '"';
+        default:
+          return `curl -sSL ${RAW}/run.sh | bash` + (custom ? ` -s -- --lat ${la} --lon ${lo} --name "${name}"` : '');
+      }
+    }
+    function highlightCmd(cmd) {
+      return esc(cmd)
+        .replace(/https:\/\/[^\s)"']+/g, (m) => `<span class="tok-url">${m}</span>`)
+        .replace(/(^|\s)(--?[A-Za-z][\w-]*)/g, '$1<span class="tok-flag">$2</span>')
+        .replace(/(&quot;[^&]*?&quot;|'[^']*')/g, (m) => m.includes('tok-') ? m : `<span class="tok-str">${m}</span>`)
+        .replace(/\s(\|)\s/g, ' <span class="tok-op">$1</span> ');
+    }
+    function renderCommand() {
+      const cmd = buildCommand();
+      $('#cmd-text').innerHTML = highlightCmd(cmd);
+      $('#cmd-prompt').textContent = state.os === 'win' ? '>' : '$';
+    }
+    const osSeg = bindSeg($('#os-seg'), 'os', (v) => { state.os = v; renderCommand(); });
+    osSeg.select(state.os);
+    renderCommand();
+    $('#cmd-copy').addEventListener('click', (e) => copyText(buildCommand(), e.currentTarget));
+    $('#ha-copy').addEventListener('click', (e) => copyText($('#ha-url').textContent, e.currentTarget));
+    const HA = {
+      hook: { verb: 'POST', url: '/api/webhook/quake_alert_local' },
+      rest: { verb: 'GET', url: 'http://127.0.0.1:8990/status' },
+    };
+    bindSeg($('#ha-seg'), 'v', (v) => {
+      $('#ha-verb').textContent = HA[v].verb;
+      $('#ha-url').textContent = HA[v].url;
+      $$('pre.yaml').forEach((pre) => { pre.hidden = pre.dataset.v !== v; });
+    });
 
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.start(now);
-        osc.stop(now + 1.2);
-
-        if ('speechSynthesis' in window) {
-          window.speechSynthesis.cancel();
-          const ut = new SpeechSynthesisUtterance(`Attention. Earthquake alert detected. Magnitude ${mag} in ${city}.`);
-          ut.lang = 'en-US';
-          ut.rate = 1.05;
-          window.speechSynthesis.speak(ut);
+    /* ---------------- Seismograph ---------------- */
+    class Seismograph {
+      constructor(canvas) {
+        this.c = canvas;
+        this.ctx = canvas.getContext('2d');
+        this.speed = 64;               // samples (= css px) per second
+        this.sampleN = 0;
+        this.kicks = [];
+        this.markers = [];
+        this.alertUntil = 0;
+        this.lanes = [
+          { name: 'P', color: '#38bdf8', noise: 0, buf: new Float32Array(1), head: 0 },
+          { name: 'S', color: '#22c55e', noise: 0, buf: new Float32Array(1), head: 0 },
+        ];
+        this.acc = 0;
+        this.last = performance.now();
+        this.resize();
+        new ResizeObserver(() => this.resize()).observe(canvas);
+        // prefill so the trace is already running on load
+        for (let i = 0; i < this.w; i++) this.step();
+        requestAnimationFrame((t) => this.frame(t));
+      }
+      resize() {
+        const r = this.c.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.max(2, Math.round(r.width));
+        this.h = Math.max(2, Math.round(r.height));
+        this.c.width = w * dpr; this.c.height = this.h * dpr;
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (w !== this.w) {
+          for (const L of this.lanes) {
+            const old = this.ordered(L);
+            const nb = new Float32Array(w);
+            const n = Math.min(old.length, w);
+            nb.set(old.subarray(old.length - n), w - n);
+            L.buf = nb; L.head = 0;
+          }
+          this.w = w;
         }
+      }
+      ordered(L) {
+        const n = L.buf.length, out = new Float32Array(n);
+        for (let i = 0; i < n; i++) out[i] = L.buf[(L.head + i) % n];
+        return out;
+      }
+      kick(type, label) {
+        const t = this.sampleN / this.speed;
+        const P = { ping: [0.32, 0.06, 0.55, 7.5], data: [0.6, 0.08, 1.0, 6.5], quake: [0.85, 0.1, 1.8, 6] }[type];
+        const S = { ping: [0.22, 0.1, 0.8, 3.4], data: [0.75, 0.14, 1.6, 3.0], quake: [1.15, 0.2, 3.4, 2.6] }[type];
+        const delay = { ping: 0.35, data: 0.8, quake: 1.2 }[type];
+        this.kicks.push({ lane: 0, t0: t, amp: P[0], attack: P[1], decay: P[2], freq: P[3], ph: Math.random() * 6 });
+        this.kicks.push({ lane: 1, t0: t + delay, amp: S[0], attack: S[1], decay: S[2], freq: S[3], ph: Math.random() * 6 });
+        this.markers.push({ at: this.sampleN, label, color: type === 'quake' ? '#ef4444' : type === 'data' ? '#22c55e' : '#38bdf8' });
+        if (type === 'quake') this.alertUntil = performance.now() + 9000;
+      }
+      sample(li, t) {
+        const L = this.lanes[li];
+        L.noise += (Math.random() - 0.5) * 0.5 - L.noise * 0.3;
+        const tau = Math.PI * 2;
+        let v = li === 0
+          ? 0.045 * Math.sin(t * tau * 1.1) + 0.025 * Math.sin(t * tau * 2.7 + 1.3)
+          : 0.055 * Math.sin(t * tau * 0.55 + 0.4) + 0.03 * Math.sin(t * tau * 1.35 + 2.1);
+        v += L.noise * 0.05;
+        for (const k of this.kicks) {
+          if (k.lane !== li) continue;
+          const d = t - k.t0;
+          if (d < 0) continue;
+          const env = k.amp * (1 - Math.exp(-d / k.attack)) * Math.exp(-d / k.decay);
+          v += env * Math.sin(tau * k.freq * d + k.ph) * (0.7 + 0.3 * Math.sin(tau * k.freq * 0.31 * d));
+        }
+        return v;
+      }
+      step() {
+        const t = this.sampleN / this.speed;
+        for (let li = 0; li < 2; li++) {
+          const L = this.lanes[li];
+          L.buf[L.head] = this.sample(li, t);
+          L.head = (L.head + 1) % L.buf.length;
+        }
+        this.sampleN++;
+      }
+      frame(now) {
+        const dt = Math.min(0.1, (now - this.last) / 1000);
+        this.last = now;
+        this.acc += dt * this.speed * (reduceMotion ? 0.5 : 1);
+        let n = Math.floor(this.acc);
+        this.acc -= n;
+        while (n-- > 0) this.step();
+        const tNow = this.sampleN / this.speed;
+        this.kicks = this.kicks.filter((k) => tNow - k.t0 < k.decay * 7);
+        this.markers = this.markers.filter((m) => this.sampleN - m.at < this.w + 80);
+        this.draw(now);
+        requestAnimationFrame((t) => this.frame(t));
+      }
+      peak() {
+        const L = this.lanes[1], n = L.buf.length, span = Math.min(n, this.speed * 2);
+        let p = 0;
+        for (let i = 1; i <= span; i++) p = Math.max(p, Math.abs(L.buf[(L.head - i + n) % n]));
+        return p;
+      }
+      draw(now) {
+        const { ctx, w, h } = this;
+        const axisH = 20, top = 6, laneH = (h - axisH - top) / 2;
+        ctx.clearRect(0, 0, w, h);
 
-        const b = document.getElementById('alert-banner');
-        b.style.display = 'block';
-        b.innerText = `🚨 EARTHQUAKE ALERT! M${mag} in ${city}`;
-        setTimeout(() => { b.style.display = 'none'; }, 8000);
+        // second grid, scrolling with the trace
+        const sec = this.speed;
+        const firstSec = Math.ceil((this.sampleN - w) / sec);
+        for (let s = firstSec; s * sec <= this.sampleN; s++) {
+          const x = w - 1 - (this.sampleN - s * sec);
+          const major = s % 5 === 0;
+          ctx.fillStyle = major ? 'rgba(148,163,184,0.10)' : 'rgba(148,163,184,0.045)';
+          ctx.fillRect(Math.round(x), top, 1, laneH * 2);
+        }
+        // fixed relative time axis
+        ctx.font = '500 10px "Geist Mono", ui-monospace, monospace';
+        ctx.fillStyle = 'rgba(138,148,166,0.75)';
+        ctx.textBaseline = 'middle';
+        for (let s = 0; s * sec < w - 30; s += 2) {
+          const x = w - 1 - s * sec;
+          const label = s === 0 ? 'now' : `-${s}s`;
+          ctx.textAlign = s === 0 ? 'right' : 'center';
+          ctx.fillText(label, s === 0 ? x - 2 : x, h - axisH / 2);
+          ctx.fillRect(Math.round(x), h - axisH, 1, 4);
+        }
+        ctx.fillStyle = 'rgba(148,163,184,0.12)';
+        ctx.fillRect(0, h - axisH, w, 1);
+
+        const alerting = now < this.alertUntil;
+        this.lanes.forEach((L, li) => {
+          const mid = top + laneH * li + laneH / 2;
+          const half = laneH / 2 - 6;
+          // baseline + lane divider
+          ctx.setLineDash([2, 4]);
+          ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+          ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.moveTo(0, mid + 0.5); ctx.lineTo(w, mid + 0.5); ctx.stroke();
+          ctx.setLineDash([]);
+          if (li === 1) { ctx.fillStyle = 'rgba(148,163,184,0.09)'; ctx.fillRect(0, top + laneH, w, 1); }
+
+          const color = li === 1 && alerting ? '#ef4444' : L.color;
+          const grad = ctx.createLinearGradient(0, 0, w, 0);
+          grad.addColorStop(0, color + '00');
+          grad.addColorStop(0.22, color + 'aa');
+          grad.addColorStop(1, color);
+          const n = L.buf.length;
+          ctx.beginPath();
+          let yLast = mid;
+          for (let i = 0; i < n; i++) {
+            const v = L.buf[(L.head + i) % n];
+            const y = mid - Math.tanh(v * 1.15) * half;
+            i ? ctx.lineTo(i, y) : ctx.moveTo(i, y);
+            yLast = y;
+          }
+          ctx.lineJoin = 'round';
+          if (!reduceMotion) {
+            ctx.strokeStyle = color + '22'; ctx.lineWidth = 5; ctx.stroke();
+          }
+          ctx.strokeStyle = grad; ctx.lineWidth = 1.4; ctx.stroke();
+
+          // pen
+          ctx.fillStyle = color + '33';
+          ctx.beginPath(); ctx.arc(w - 2, yLast, 7, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = '#f8fafc';
+          ctx.beginPath(); ctx.arc(w - 2, yLast, 2.2, 0, Math.PI * 2); ctx.fill();
+
+          // lane label
+          ctx.textAlign = 'left';
+          ctx.fillStyle = color;
+          ctx.fillText(li === 0 ? 'P · CH1' : 'S · CH2', 10, top + laneH * li + 12);
+        });
+
+        // event markers; labels that would collide step down a row
+        let prevRight = -Infinity, row = 0;
+        ctx.font = '500 9.5px "Geist Mono", ui-monospace, monospace';
+        for (const m of this.markers) {
+          const x = Math.round(w - 1 - (this.sampleN - m.at)) + 0.5;
+          const tw = ctx.measureText(m.label).width + 10;
+          row = x - tw / 2 < prevRight + 4 ? (row + 1) % 3 : 0;
+          prevRight = x + tw / 2;
+          if (x < -60) continue;
+          const ly = top + 2 + row * 17;
+          ctx.strokeStyle = m.color + '88';
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath(); ctx.moveTo(x, ly + 16); ctx.lineTo(x, top + laneH * 2); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = '#060a14';
+          ctx.strokeStyle = m.color + '99';
+          ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - tw / 2, ly, tw, 15, 4) : ctx.rect(x - tw / 2, ly, tw, 15); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = m.color; ctx.textAlign = 'center';
+          ctx.fillText(m.label, x, ly + 8);
+        }
+      }
+    }
+
+    const scope = new Seismograph($('#scope'));
+    let eventCount = 0;
+    function pulse(type, label) {
+      scope.kick(type, label);
+      eventCount++;
+      $('#hud-events').textContent = `${eventCount} event${eventCount === 1 ? '' : 's'}`;
+      $('#hud-last').textContent = `${label.toLowerCase()} ${clock()}`;
+    }
+    setInterval(() => { $('#hud-amp').textContent = scope.peak().toFixed(2); }, 250);
+
+    /* ---------------- Console ---------------- */
+    const term = $('#term');
+    const TAGS = {
+      hb: 'tg-hb', iq: 'tg-iq', data: 'tg-data', sys: 'tg-sys', warn: 'tg-warn', alert: 'tg-alert',
+    };
+    const FILTER_OF = { hb: 'hb', iq: 'hb', data: 'data', alert: 'data', sys: 'sys', warn: 'sys' };
+
+    function classify(msg) {
+      if (/EARTHQUAKE|alert detected/i.test(msg)) return ['alert', 'QuakeAlert'];
+      if (/drill/i.test(msg)) return ['alert', 'Drill'];
+      if (/error|exception|warning|fail/i.test(msg)) return ['warn', 'Error'];
+      if (/iq ?stanza/i.test(msg)) return ['iq', 'IqStanza'];
+      if (/heartbeat ?ack|pong|ack(nowledged)?\b/i.test(msg)) return ['hb', 'HeartbeatAck'];
+      if (/heartbeat|ping|keepalive/i.test(msg)) return ['hb', 'HeartbeatPing'];
+      if (/data ?message|stanza|payload/i.test(msg)) return ['data', 'DataMessage'];
+      if (/authenticat|login|handshake/i.test(msg)) return ['sys', 'LoginResponse'];
+      if (/webhook/i.test(msg)) return ['sys', 'Webhook'];
+      if (/regist/i.test(msg)) return ['sys', 'Checkin'];
+      return ['sys', 'Log'];
+    }
+    function decorate(msg) {
+      return esc(msg)
+        .replace(/(https?:\/\/[^\s)]+|mtalk\.google\.com(:\d+)?|127\.0\.0\.1(:\d+)?|0\.0\.0\.0(:\d+)?)/g, '<span class="hl-host">$1</span>')
+        .replace(/(\b\d+(?:\.\d+)?\s?ms\b|\bM\d\.\d\b|\bHTTP \d{3}\b)/g, '<span class="hl-num">$1</span>');
+    }
+    function addLine(msg, opts = {}) {
+      const clean = String(msg).replace(/^[\p{Extended_Pictographic}️\s]+/u, '');
+      const [kind, tag] = opts.kind ? [opts.kind, opts.tag] : classify(clean);
+      const el = document.createElement('div');
+      el.className = 'ln';
+      el.dataset.f = FILTER_OF[kind] || 'sys';
+      el.innerHTML = `<span class="t">${esc(opts.time || clock())}</span><span class="tg ${TAGS[kind]}">${esc(tag)}</span><span class="msg">${decorate(clean)}</span>`;
+      el.hidden = state.filter !== 'all' && el.dataset.f !== state.filter;
+      term.appendChild(el);
+      while (term.children.length > 220) term.firstChild.remove();
+      if (!state.paused) term.scrollTop = term.scrollHeight;
+      $('#term-count').textContent = `${term.children.length} lines`;
+      return kind;
+    }
+    bindSeg($('#filter-seg'), 'f', (f) => {
+      state.filter = f;
+      $$('.ln', term).forEach((el) => { el.hidden = f !== 'all' && el.dataset.f !== f; });
+      term.scrollTop = term.scrollHeight;
+    });
+    $('#term-pause').addEventListener('click', (e) => {
+      state.paused = !state.paused;
+      const b = e.currentTarget;
+      b.setAttribute('aria-pressed', String(state.paused));
+      b.setAttribute('aria-label', state.paused ? 'Resume autoscroll' : 'Pause autoscroll');
+      $('use', b).setAttribute('href', state.paused ? '#i-play' : '#i-pause');
+      toast(state.paused ? 'Autoscroll paused' : 'Autoscroll on');
+    });
+    $('#term-clear').addEventListener('click', () => { term.innerHTML = ''; $('#term-count').textContent = '0 lines'; });
+
+    /* ---------------- Telemetry ---------------- */
+    function flash(el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+    function setLatency(ms) {
+      const el = $('#st-lat');
+      el.innerHTML = `${Math.round(ms * 10) / 10}<small>ms</small>`;
+      flash(el);
+      state.latHist.push(ms);
+      if (state.latHist.length > 24) state.latHist.shift();
+      const hs = state.latHist, lo = Math.min(...hs), hi = Math.max(...hs), span = Math.max(1, hi - lo);
+      const d = hs.map((v, i) => `${i ? 'L' : 'M'}${(i / Math.max(1, hs.length - 1)) * 64} ${20 - ((v - lo) / span) * 18}`).join(' ');
+      $('#spark').setAttribute('d', d);
+    }
+    function setCount(id, n) { const el = $(id); if (el.textContent !== String(n)) { el.textContent = n; flash(el); } }
+    function maskId(id) { const s = String(id); return s.length > 10 ? `${s.slice(0, 4)}…${s.slice(-4)}` : s; }
+
+    function setLinked(on) {
+      state.linked = on;
+      const navChip = $('#nav-chip'), scopeChip = $('#scope-chip');
+      navChip.dataset.tone = on ? 'green' : 'amber';
+      $('span:last-child', navChip).textContent = on ? 'Bridge linked' : 'Standalone';
+      scopeChip.dataset.tone = on ? 'green' : 'amber';
+      $('span:last-child', scopeChip).textContent = on ? 'Live' : 'Simulated';
+      const link = $('#st-link');
+      link.textContent = on ? 'Linked' : 'Standalone';
+      link.style.color = on ? 'var(--green)' : 'var(--amber)';
+      $('#st-link-sub').textContent = on ? state.base.replace('http://', '') : 'scanning loopback…';
+      $('#term-src').textContent = on ? `source: ${state.base.replace('http://', '')}` : 'source: simulated';
+      $('#ctl-hint').textContent = on
+        ? 'Linked. Ping and Drill go through your bridge. Drill fires your webhook, so it asks twice.'
+        : 'Simulated here. With a bridge linked, Ping and Drill go through it — Drill also fires your webhook.';
+      if (on) {
+        state.prev = null; state.lastLogKey = null;
+        addLine(`Local bridge linked on ${state.base.replace('http://', '')}`, { kind: 'sys', tag: 'Bridge' });
+        toast('Bridge linked — showing live data');
+      } else {
+        $('#st-hwid').textContent = '—';
+        addLine('Bridge went quiet. Back to simulated traffic.', { kind: 'warn', tag: 'Bridge' });
+      }
+    }
+
+    async function fetchJSON(url, opts = {}, ms = 1500) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), ms);
+      try {
+        const r = await fetch(url, { cache: 'no-store', ...opts, signal: ctl.signal });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return await r.json();
+      } finally { clearTimeout(timer); }
+    }
+
+    async function poll() {
+      let data = null;
+      const order = state.base ? [state.base, ...BRIDGES.filter((b) => b !== state.base)] : BRIDGES;
+      for (const base of order) {
+        try { data = await fetchJSON(base + '/status', {}, 1200); state.base = base; break; } catch {}
+      }
+      if (data) {
+        state.fails = 0;
+        if (!state.linked) setLinked(true);
+        ingest(data);
+      } else if (state.linked && ++state.fails >= 3) {
+        setLinked(false);
+      }
+      setTimeout(poll, state.linked ? 2000 : 4000);
+    }
+
+    function ingest(d) {
+      const g = d.google_mcs || {};
+      const cur = {
+        pings: g.pings_received | 0,
+        msgs: g.messages_received | 0,
+        det: d.total_detections | 0,
+      };
+      if (g.latency_ms != null && g.latency_ms !== state.latHist[state.latHist.length - 1]) setLatency(g.latency_ms);
+      if (state.prev) {
+        if (cur.pings > state.prev.pings) pulse('ping', 'HEARTBEAT');
+        if (cur.msgs > state.prev.msgs) pulse('data', 'DATA');
+        if (cur.det > state.prev.det && Date.now() > state.suppressQuakeUntil) onQuake(d.last_quake || {});
+      }
+      state.prev = cur;
+      setCount('#st-pings', cur.pings);
+      $('#st-msgs').textContent = `${cur.msgs} data message${cur.msgs === 1 ? '' : 's'}`;
+      if (g.android_id) $('#st-hwid').textContent = maskId(g.android_id);
+      if (g.last_packet_ts) $('#hud-last').textContent = new Date(g.last_packet_ts * 1000).toTimeString().slice(0, 8);
+
+      const logs = Array.isArray(d.recent_logs) ? d.recent_logs : [];
+      if (logs.length) {
+        const keys = logs.map((l) => `${l.time}|${l.msg}`);
+        let from = state.lastLogKey ? keys.lastIndexOf(state.lastLogKey) + 1 : Math.max(0, logs.length - 30);
+        for (let i = from; i < logs.length; i++) addLine(logs[i].msg, { time: logs[i].time });
+        state.lastLogKey = keys[keys.length - 1];
+      }
+    }
+
+    /* ---------------- Simulation (no bridge) ---------------- */
+    function simLatency() { return Math.round((26 + Math.random() * 16) * 10) / 10; }
+    function simTick() {
+      if (!state.linked) {
+        const ms = simLatency();
+        addLine('→ mtalk.google.com:5228  keepalive', { kind: 'hb', tag: 'HeartbeatPing' });
+        setTimeout(() => {
+          if (state.linked) return;
+          addLine(`← ack in ${ms} ms`, { kind: 'hb', tag: 'HeartbeatAck' });
+          setLatency(ms);
+          setCount('#st-pings', ++state.simPings);
+          pulse('ping', 'HEARTBEAT');
+          if (Math.random() < 0.3) {
+            setTimeout(() => {
+              if (state.linked) return;
+              addLine('← server keepalive, selective ack', { kind: 'iq', tag: 'IqStanza' });
+              pulse('ping', 'IQ');
+            }, 1400);
+          }
+        }, 260 + ms * 4);
+      }
+      setTimeout(simTick, 6500 + Math.random() * 4000);
+    }
+
+    /* ---------------- Audio ---------------- */
+    let audio = null;
+    function audioCtx() {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === 'suspended') audio.resume();
+      return audio;
+    }
+    function siren(seconds = 1.8) {
+      try {
+        const ac = audioCtx(), t = ac.currentTime;
+        const out = ac.createGain();
+        out.gain.setValueAtTime(0.0001, t);
+        out.gain.exponentialRampToValueAtTime(0.22, t + 0.05);
+        out.gain.setValueAtTime(0.22, t + seconds - 0.25);
+        out.gain.exponentialRampToValueAtTime(0.0001, t + seconds);
+        const lp = ac.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = 2600;
+        lp.connect(out); out.connect(ac.destination);
+        ['sawtooth', 'triangle'].forEach((type, i) => {
+          const o = ac.createOscillator();
+          o.type = type;
+          o.detune.value = i ? 7 : -7;
+          for (let k = 0, s = t; s < t + seconds; k++, s += 0.38) {
+            o.frequency.setValueAtTime(k % 2 ? 640 : 960, s);
+            o.frequency.exponentialRampToValueAtTime(k % 2 ? 960 : 640, s + 0.36);
+          }
+          o.connect(lp); o.start(t); o.stop(t + seconds + 0.05);
+        });
       } catch (e) { console.warn(e); }
     }
-
-    function testWebSiren() {
-      playSiren(5.2, currentCityName || "Your Area");
+    function speak(text) {
+      if (!$('#opt-voice').checked || !('speechSynthesis' in window)) return;
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'en-US'; u.rate = 1.02;
+      speechSynthesis.speak(u);
     }
 
-    // Leaflet Map Initialization
-    const map = L.map('map', { zoomControl: true }).setView([userLat, userLon], 2);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors',
-      maxZoom: 19
-    }).addTo(map);
+    /* ---------------- Alert overlay ---------------- */
+    let alertTimer;
+    function showAlert(title, sub, seconds = 9) {
+      const a = $('#alert');
+      $('#alert-title').textContent = title;
+      $('#alert-sub').textContent = sub;
+      a.style.setProperty('--dur', seconds + 's');
+      a.classList.remove('is-on'); void a.offsetWidth; a.classList.add('is-on');
+      document.body.classList.add('is-alerting');
+      clearTimeout(alertTimer);
+      alertTimer = setTimeout(hideAlert, seconds * 1000);
+    }
+    function hideAlert() {
+      $('#alert').classList.remove('is-on');
+      document.body.classList.remove('is-alerting');
+    }
+    $('#alert-close').addEventListener('click', hideAlert);
 
-    let userMarker = null;
-    let circleRadius = null;
+    function onQuake(q) {
+      const mag = q.magnitude ?? q.magnitud ?? '?';
+      const drill = /drill|simulacro/i.test(q.level || q.nivel || '');
+      showAlert(drill ? `Drill · M${mag}` : `Earthquake alert · M${mag}`, q.place || q.lugar || 'Received from the bridge');
+      siren(); speak(drill ? `This is a drill. Magnitude ${mag}.` : `Earthquake alert. Magnitude ${mag}.`);
+      pulse('quake', drill ? 'DRILL' : 'QUAKE');
+      if (q.lat != null && q.lon != null) ripple(q.lat, q.lon);
+    }
 
-    function renderUserLocation(lat, lon, name) {
-      userLat = lat;
-      userLon = lon;
-      currentCityName = name;
+    /* ---------------- Controls ---------------- */
+    function keyFeedback(btn, text, ms = 1800) {
+      const s = $('.key-s', btn);
+      btn.classList.add('is-lit');
+      s.textContent = text;
+      if (navigator.vibrate) navigator.vibrate(12);
+      clearTimeout(btn._t);
+      btn._t = setTimeout(() => { btn.classList.remove('is-lit'); s.textContent = s.dataset.idle; }, ms);
+    }
+    const actions = {
+      async ping(btn) {
+        keyFeedback(btn, 'sending…', 4000);
+        addLine('→ mtalk.google.com:5228  manual ping', { kind: 'hb', tag: 'HeartbeatPing' });
+        if (state.linked) {
+          try {
+            const j = await fetchJSON(state.base + '/ping', { method: 'POST' }, 8000);
+            if (j.latency_ms != null) {
+              addLine(`← ack in ${j.latency_ms} ms`, { kind: 'hb', tag: 'HeartbeatAck' });
+              setLatency(j.latency_ms);
+              pulse('ping', 'PING');
+              keyFeedback(btn, `ack · ${j.latency_ms} ms`);
+            } else {
+              keyFeedback(btn, 'no ack');
+            }
+          } catch (e) {
+            addLine(`Ping failed: ${e.message || e}`, { kind: 'warn', tag: 'Error' });
+            keyFeedback(btn, 'failed');
+          }
+        } else {
+          const ms = simLatency();
+          setTimeout(() => {
+            addLine(`← ack in ${ms} ms (simulated)`, { kind: 'hb', tag: 'HeartbeatAck' });
+            setLatency(ms);
+            pulse('ping', 'PING');
+            keyFeedback(btn, `ack · ${ms} ms`);
+          }, 120 + ms * 3);
+        }
+      },
+      siren(btn) {
+        keyFeedback(btn, 'playing…', 2000);
+        siren();
+        setTimeout(() => speak('This is a test of the earthquake siren.'), 1900);
+      },
+      async drill(btn) {
+        if (state.linked && !btn._armed) {
+          btn._armed = true;
+          btn.classList.add('is-armed');
+          keyFeedback(btn, 'armed · press again', 3000);
+          clearTimeout(btn._armT);
+          btn._armT = setTimeout(() => { btn._armed = false; btn.classList.remove('is-armed'); }, 3000);
+          return;
+        }
+        btn._armed = false;
+        btn.classList.remove('is-armed');
+        keyFeedback(btn, 'drill running', 9000);
+        const name = state.loc.name || DEFAULT_LOC.name;
+        state.suppressQuakeUntil = Date.now() + 8000;
+        showAlert('Drill · simulated M5.5', `38 km from ${name} · depth 18 km · this is not a real event`);
+        siren();
+        setTimeout(() => speak(`This is a drill. Simulated earthquake, magnitude 5.5, 38 kilometres from ${name}.`), 1900);
+        pulse('quake', 'DRILL');
+        addLine(`Drill: simulated M5.5, 38 km from ${name}`, { kind: 'alert', tag: 'Drill' });
+        ripple(state.loc.lat + 0.22, state.loc.lon + 0.18);
+        if (state.linked) {
+          try {
+            const j = await fetchJSON(state.base + '/drill', { method: 'POST' }, 8000);
+            addLine(`Bridge dispatched drill (webhook: ${j.webhook_status ?? 'n/a'})`, { kind: 'sys', tag: 'Webhook' });
+          } catch (e) {
+            addLine(`Bridge drill failed: ${e.message || e}`, { kind: 'warn', tag: 'Error' });
+          }
+        }
+      },
+    };
+    $$('.key').forEach((btn) => {
+      btn.addEventListener('pointerdown', () => btn.classList.add('is-down'));
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, () => btn.classList.remove('is-down')));
+      btn.addEventListener('click', () => actions[btn.dataset.act](btn));
+    });
 
-      document.getElementById('loc-name').innerText = name;
-      updateCodeSnippet();
-
-      if (userMarker) map.removeLayer(userMarker);
-      if (circleRadius) map.removeLayer(circleRadius);
-
-      map.flyTo([lat, lon], 9);
-
-      const pinIcon = L.divIcon({
-        html: '<div style="background:#38bdf8;width:16px;height:16px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 14px #38bdf8;"></div>',
-        className: ''
-      });
-      userMarker = L.marker([lat, lon], { icon: pinIcon }).addTo(map)
-        .bindPopup(`<b>🏠 Your Location</b><br>${name}<br>Coordinates: ${lat.toFixed(4)}, ${lon.toFixed(4)}`).openPopup();
-
-      circleRadius = L.circle([lat, lon], {
-        radius: 150000,
-        color: '#eab308',
-        weight: 1.5,
-        opacity: 0.5,
-        fillOpacity: 0.06
+    /* ---------------- Map ---------------- */
+    let map = null, baseMarker = null, baseCircle = null;
+    function pinIcon(red) {
+      return L.divIcon({ className: '', html: `<span class="pin${red ? ' pin-red' : ''}"></span>`, iconSize: [14, 14], iconAnchor: [7, 7] });
+    }
+    function initMap() {
+      if (!window.L || map) return;
+      map = L.map('map', { zoomControl: false, scrollWheelZoom: false, worldCopyJump: true, minZoom: 1, attributionControl: true })
+        .setView([12, 0], 2);
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 16,
+        attribution: 'Tiles &copy; Esri &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap contributors',
       }).addTo(map);
+      placeBase(false);
     }
-
-    // Geolocation Detection
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const lat = pos.coords.latitude;
-          const lon = pos.coords.longitude;
-          fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`)
-            .then(r => r.json())
-            .then(data => {
-              const city = data.address.city || data.address.town || data.address.state || "Your Location";
-              renderUserLocation(lat, lon, `${city}, ${data.address.country || ''}`);
-            })
-            .catch(() => renderUserLocation(lat, lon, "Your Current Location"));
-        },
-        () => {
-          fetch('https://ipapi.co/json/')
-            .then(r => r.json())
-            .then(d => renderUserLocation(d.latitude, d.longitude, `${d.city}, ${d.country_name}`))
-            .catch(() => renderUserLocation(userLat, userLon, currentCityName));
-        },
-        { timeout: 7000 }
-      );
-    } else {
-      renderUserLocation(userLat, userLon, currentCityName);
+    function placeBase(fly) {
+      const { lat, lon, name } = state.loc;
+      $('#loc-chip').textContent = `${name || DEFAULT_LOC.name} · ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+      if (!map) return;
+      if (baseMarker) baseMarker.remove();
+      if (baseCircle) baseCircle.remove();
+      baseCircle = L.circle([lat, lon], { radius: 150000, color: '#38bdf8', weight: 1, opacity: 0.5, dashArray: '4 6', fillColor: '#38bdf8', fillOpacity: 0.05 }).addTo(map);
+      baseMarker = L.marker([lat, lon], { icon: pinIcon(false), keyboard: false })
+        .bindTooltip(name || DEFAULT_LOC.name, { direction: 'top', offset: [0, -10], className: 'tip', permanent: true })
+        .addTo(map);
+      if (fly) map.flyTo([lat, lon], isDefaultLoc() ? 2 : 6, { duration: reduceMotion ? 0 : 1.2 });
     }
-
-    // Command Selector Tabs
-    function selectTab(tab) {
-      activeTab = tab;
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
-      const idx = ['mac', 'win', 'py', 'docker'].indexOf(tab);
-      if (idx >= 0) document.querySelectorAll('.tab-btn')[idx].classList.add('active');
-      updateCodeSnippet();
+    function ripple(lat, lon) {
+      if (!map) return;
+      const epi = L.marker([lat, lon], { icon: pinIcon(true), keyboard: false }).addTo(map);
+      const p = L.circle([lat, lon], { radius: 1, color: '#38bdf8', weight: 1.5, fill: false, opacity: 0.9 }).addTo(map);
+      const s = L.circle([lat, lon], { radius: 1, color: '#ef4444', weight: 2, fillColor: '#ef4444', fillOpacity: 0.08 }).addTo(map);
+      if (map.getZoom() < 5) map.flyTo([lat, lon], 6, { duration: reduceMotion ? 0 : 1 });
+      const t0 = performance.now(), dur = 8000;
+      (function anim(now) {
+        const k = Math.min(1, (now - t0) / dur);
+        p.setRadius(1 + k * 420000);      // P-waves travel ~1.7x faster than S-waves
+        s.setRadius(1 + k * 245000);
+        p.setStyle({ opacity: 0.9 * (1 - k) });
+        s.setStyle({ opacity: 1 - k * 0.8, fillOpacity: 0.08 * (1 - k) });
+        if (k < 1) requestAnimationFrame(anim); else { p.remove(); s.remove(); setTimeout(() => epi.remove(), 4000); }
+      })(t0);
     }
+    window.addEventListener('load', initMap);
 
-    function updateCodeSnippet() {
-      const latStr = userLat.toFixed(4);
-      const lonStr = userLon.toFixed(4);
-      const nameSafe = currentCityName.replace(/"/g, '');
-      let code = "";
-
-      if (activeTab === 'mac') {
-        code = `curl -sSL https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/run.sh | bash -s -- --lat ${latStr} --lon ${lonStr} --name "${nameSafe}"`;
-      } else if (activeTab === 'win') {
-        code = `& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/run.ps1))) -Lat ${latStr} -Lon ${lonStr} -Name "${nameSafe}"`;
-      } else if (activeTab === 'py') {
-        code = `curl -sSL https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/quake_listener.py | python3 - --lat ${latStr} --lon ${lonStr} --name "${nameSafe}"`;
-      } else if (activeTab === 'docker') {
-        code = `docker run --rm -it -p 8990:8990 python:alpine sh -c "wget -qO- https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/quake_listener.py | python3 - --lat ${latStr} --lon ${lonStr}"`;
-      }
-      document.getElementById('code-snippet').innerText = code;
+    // location form
+    function readLoc() {
+      const latEl = $('#loc-lat'), lonEl = $('#loc-lon');
+      const lat = parseFloat(latEl.value), lon = parseFloat(lonEl.value);
+      const latOk = Number.isFinite(lat) && lat >= -90 && lat <= 90;
+      const lonOk = Number.isFinite(lon) && lon >= -180 && lon <= 180;
+      latEl.setAttribute('aria-invalid', String(!latOk));
+      lonEl.setAttribute('aria-invalid', String(!lonOk));
+      if (!latOk || !lonOk) return;
+      state.loc = { name: $('#loc-name').value.trim() || DEFAULT_LOC.name, lat, lon };
+      renderCommand();
+      placeBase(true);
     }
+    let locTimer;
+    $$('#loc-form input').forEach((el) => el.addEventListener('input', () => { clearTimeout(locTimer); locTimer = setTimeout(readLoc, 450); }));
+    $('#loc-form').addEventListener('submit', (e) => { e.preventDefault(); readLoc(); });
+    $('#loc-me').addEventListener('click', (e) => {
+      const btn = e.currentTarget;
+      if (!navigator.geolocation) return toast('Geolocation not available');
+      btn.disabled = true;
+      navigator.geolocation.getCurrentPosition((pos) => {
+        btn.disabled = false;
+        $('#loc-lat').value = pos.coords.latitude.toFixed(2);
+        $('#loc-lon').value = pos.coords.longitude.toFixed(2);
+        readLoc();
+        toast('Location filled in (rounded)');
+      }, () => { btn.disabled = false; toast('Location permission denied'); }, { timeout: 8000, maximumAge: 600000 });
+    });
 
-    function copyActiveCommand() {
-      const text = document.getElementById('code-snippet').innerText;
-      navigator.clipboard.writeText(text);
-      alert("Command copied to clipboard!\n\n" + text);
-    }
+    /* ---------------- Reveal on scroll ---------------- */
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((en) => { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { threshold: 0.12 });
+    $$('[data-reveal]').forEach((el) => io.observe(el));
 
-    // Real-Time Local Bridge Poller
-    async function checkLocalBridge() {
-      const endpoints = ["http://127.0.0.1:8990/status", "http://localhost:8990/status"];
-      let foundData = null;
-
-      for (const ep of endpoints) {
-        try {
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 1200);
-          const res = await fetch(ep, { mode: 'cors', signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (res.ok) {
-            foundData = await res.json();
-            break;
-          }
-        } catch (e) {
-          // Continue scanning next loopback candidate
-        }
-      }
-
-      if (foundData) {
-        bridgeFailCount = 0;
-        if (!isBridgeConnected) {
-          onBridgeConnected(foundData);
-        }
-        updateBridgeTelemetry(foundData);
-      } else {
-        bridgeFailCount++;
-        if (bridgeFailCount >= 3 && isBridgeConnected) {
-          onBridgeDisconnected();
-        }
-      }
-    }
-
-    function onBridgeConnected(data) {
-      isBridgeConnected = true;
-      const mainBadge = document.getElementById('main-bridge-badge');
-      mainBadge.className = 'badge-status badge-live';
-      document.getElementById('bridge-badge-text').innerText = 'REAL-TIME BRIDGE ACTIVE';
-
-      const panelPill = document.getElementById('bridge-pill');
-      panelPill.className = 'badge-status badge-live';
-      panelPill.innerText = 'Connected: 127.0.0.1:8990';
-
-      document.getElementById('val-link-status').innerText = '🟢 Connected';
-      document.getElementById('val-link-status').style.color = 'var(--accent-green)';
-      document.getElementById('term-status-badge').innerText = 'Live MCS Stream';
-      document.getElementById('term-status-badge').style.color = 'var(--accent-green)';
-
-      addTermLine('🟢 Local device bridge linked successfully on 127.0.0.1:8990', 'term-ok');
-    }
-
-    function onBridgeDisconnected() {
-      isBridgeConnected = false;
-      const mainBadge = document.getElementById('main-bridge-badge');
-      mainBadge.className = 'badge-status badge-sim';
-      document.getElementById('bridge-badge-text').innerText = 'STANDALONE WEB MODE';
-
-      const panelPill = document.getElementById('bridge-pill');
-      panelPill.className = 'badge-status badge-sim';
-      panelPill.innerText = 'Auto-scanning 127.0.0.1:8990...';
-
-      document.getElementById('val-link-status').innerText = '🟡 Standalone';
-      document.getElementById('val-link-status').style.color = 'var(--accent-yellow)';
-      document.getElementById('term-status-badge').innerText = 'Simulation Mode';
-      document.getElementById('term-status-badge').style.color = 'var(--accent-yellow)';
-    }
-
-    function updateBridgeTelemetry(data) {
-      if (data.google_mcs) {
-        document.getElementById('val-pings').innerText = data.google_mcs.pings_received || 0;
-        if (data.google_mcs.latency_ms !== null && data.google_mcs.latency_ms !== undefined) {
-          document.getElementById('val-lat').innerText = data.google_mcs.latency_ms + ' ms';
-        }
-        if (data.google_mcs.android_id) {
-          document.getElementById('val-hwid').innerText = data.google_mcs.android_id;
-        }
-      }
-
-      if (data.recent_logs && Array.isArray(data.recent_logs) && data.recent_logs.length > 0) {
-        const hash = JSON.stringify(data.recent_logs);
-        if (hash !== lastLogHash) {
-          lastLogHash = hash;
-          const box = document.getElementById('term-box');
-          box.innerHTML = '';
-          data.recent_logs.slice(-12).forEach(item => {
-            const el = document.createElement('div');
-            el.className = 'term-line';
-            el.innerHTML = `<span class="term-time">[${item.time}]</span> <span class="term-data">${escapeHtml(item.msg)}</span>`;
-            box.appendChild(el);
-          });
-          box.scrollTop = box.scrollHeight;
-        }
-      }
-    }
-
-    function escapeHtml(text) {
-      return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    }
-
-    function addTermLine(msg, cls) {
-      const box = document.getElementById('term-box');
-      const timeStr = new Date().toTimeString().split(' ')[0];
-      const el = document.createElement('div');
-      el.className = 'term-line';
-      el.innerHTML = `<span class="term-time">[${timeStr}]</span> <span class="${cls || 'term-data'}">${msg}</span>`;
-      box.appendChild(el);
-      box.scrollTop = box.scrollHeight;
-    }
-
-    // Ping Test
-    async function triggerPingTest() {
-      if (isBridgeConnected) {
-        addTermLine("Triggering diagnostic ping to mtalk.google.com:5228...", "term-data");
-        try {
-          const res = await fetch("http://127.0.0.1:8990/ping", { method: "POST", mode: "cors" });
-          const json = await res.json();
-          if (json.latency_ms !== null) {
-            addTermLine(`✓ Ping acknowledged! Handshake latency: ${json.latency_ms} ms`, "term-ok");
-            document.getElementById('val-lat').innerText = json.latency_ms + ' ms';
-          }
-        } catch (e) {
-          addTermLine("Error reaching local bridge ping endpoint: " + e, "term-warn");
-        }
-      } else {
-        addTermLine("Simulated Ping sent ➔ Ack received (Tag 7 IqStanza). Latency: 34 ms", "term-ok");
-        document.getElementById('val-lat').innerText = Math.floor(28 + Math.random() * 12) + " ms";
-      }
-    }
-
-    // Simulate Alert Function
-    async function simulateLocalAlert() {
-      playSiren(5.5, currentCityName);
-
-      if (isBridgeConnected) {
-        try {
-          await fetch("http://127.0.0.1:8990/drill", { method: "POST", mode: "cors" });
-          addTermLine("⚡ Safety drill event dispatched through local bridge!", "term-ok");
-        } catch (e) {}
-      }
-
-      const epiLat = userLat + 0.22;
-      const epiLon = userLon + 0.18;
-      const m = L.circleMarker([epiLat, epiLon], {
-        radius: 20,
-        fillColor: '#ef4444',
-        color: '#fff',
-        weight: 2,
-        fillOpacity: 0.8
-      }).addTo(map)
-        .bindPopup(`<b>🚨 Simulated Quake M5.5</b><br>38 km from ${currentCityName}<br>Depth: 18 km`).openPopup();
-
-      setTimeout(() => map.removeLayer(m), 15000);
-    }
-
-    // Polling intervals
-    setInterval(checkLocalBridge, 2500);
-    checkLocalBridge();
-
-    // Fallback simulation traffic when bridge is offline
-    setInterval(() => {
-      if (!isBridgeConnected) {
-        const cur = parseInt(document.getElementById('val-pings').innerText || "0") + 1;
-        document.getElementById('val-pings').innerText = cur;
-        document.getElementById('val-lat').innerText = Math.floor(28 + Math.random() * 14) + " ms";
-        addTermLine("Simulated heartbeat keepalive acknowledged (mtalk.google.com)", "term-ok");
-      }
-    }, 15000);
+    /* ---------------- Boot ---------------- */
+    // first click unlocks Web Audio on iOS/Safari
+    document.addEventListener('pointerdown', () => { try { audioCtx(); } catch {} }, { once: true });
+    addLine('Looking for a local bridge on 127.0.0.1:8990 …', { kind: 'sys', tag: 'Bridge' });
+    addLine('None yet, so this is simulated traffic. Run the command above to go live.', { kind: 'sys', tag: 'Bridge' });
+    setTimeout(simTick, 1200);
+    poll();
+  })();
   </script>
 </body>
 </html>

@@ -11,7 +11,7 @@ This document contains everything needed to launch **Quake MCS Listener** on [Pr
 | **Name of Product** | `Quake MCS Listener` |
 | **Tagline** (max 60 chars) | `Real-time earthquake alerts for Home Assistant (<15MB)` |
 | **Links** | **Website:** `https://juanipis.github.io/quake-alert-listener/`<br>**GitHub:** `https://github.com/Juanipis/quake-alert-listener` |
-| **Logo / Thumbnail** | `docs/logo.svg` (High-resolution squircle with seismic radar waveform) |
+| **Logo / Thumbnail** | `docs/logo.svg` (squircle with a two-channel seismogram: the P-wave arrives before the S-wave, which is the warning window). PNG exports: `docs/icon-180.png`, `docs/og.png` (1200×630) |
 | **Topics / Tags** | `Home Automation`, `Developer Tools`, `Open Source`, `IoT`, `Smart Home` |
 | **Pricing** | `Free / Open Source (MIT)` |
 
