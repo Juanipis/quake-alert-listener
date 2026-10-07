@@ -38,7 +38,9 @@ if ([string]::IsNullOrWhiteSpace($Lat) -or [string]::IsNullOrWhiteSpace($Lon)) {
             $Name = "$($ipInfo.city), $($ipInfo.country_name)"
             Write-Host "📍 Detected location: $Name ($Lat, $Lon)" -ForegroundColor Green
         }
-    } catch {
+    } catch {}
+    # Fall back to the generic default when detection failed OR returned no coordinates
+    if ([string]::IsNullOrWhiteSpace($Lat) -or [string]::IsNullOrWhiteSpace($Lon)) {
         $Lat = "0.0"
         $Lon = "0.0"
         $Name = "Base Station"
@@ -54,10 +56,10 @@ $PythonExe = ""
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 if ($pythonCmd) {
     try {
-        $ver = & python -c "import sys; print(sys.version_info[0])" 2>$null
-        if ($ver -eq "3") {
+        $ver = & python -c "import sys; print(int(sys.version_info >= (3, 8)))" 2>$null
+        if ($ver -eq "1") {
             $PythonExe = "python"
-            Write-Host "✓ Found existing Python 3 installation in PATH." -ForegroundColor Gray
+            Write-Host "✓ Found existing Python 3.8+ installation in PATH." -ForegroundColor Gray
         }
     } catch {}
 }

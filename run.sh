@@ -24,18 +24,16 @@ echo ""
 
 # 1. Detect Python 3
 PYTHON_BIN=""
-if command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-    # Verify Python version >= 3.7
-    PY_VER=$(python -c 'import sys; print(sys.version_info[0])' 2>/dev/null || echo "2")
-    if [ "$PY_VER" = "3" ]; then
-        PYTHON_BIN="python"
+for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && \
+       "$candidate" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)' >/dev/null 2>&1; then
+        PYTHON_BIN="$candidate"
+        break
     fi
-fi
+done
 
 if [ -z "$PYTHON_BIN" ]; then
-    echo "❌ Python 3 was not found on your system."
+    echo "❌ Python 3.8+ was not found on your system."
     echo ""
     if [ "$(uname)" = "Darwin" ]; then
         echo "On macOS, install Xcode command line tools by running:"
@@ -111,8 +109,8 @@ echo "   (The web app will automatically detect this bridge and connect in real-
 echo "⌨️  Press Ctrl+C at any time to stop."
 echo ""
 
-# 4. Launch the listener
-exec "$PYTHON_BIN" "$LISTENER_FILE" \
+# 4. Launch the listener (not `exec`, so the EXIT trap still removes the temp folder)
+"$PYTHON_BIN" "$LISTENER_FILE" \
     --lat "$LAT" \
     --lon "$LON" \
     --name "${NAME:-Local Station}" \

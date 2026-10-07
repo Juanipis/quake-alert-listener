@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/logo.svg" width="96" height="96" alt="Quake MCS Listener logo"></p>
+
 # 🌐 Quake MCS Listener
 
 > **Lightweight, autonomous Python client for the Android Earthquake Alerts System (AEAS)**  
@@ -54,8 +56,9 @@ Run directly in your terminal to launch a temporary local bridge on port 8990. T
 
 * **Docker (Any OS):**
   ```bash
-  docker run --rm -it -p 8990:8990 python:alpine sh -c "wget -qO- https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/quake_listener.py | python3 -"
+  docker run --rm -it -p 127.0.0.1:8990:8990 python:alpine sh -c "wget -qO- https://raw.githubusercontent.com/Juanipis/quake-alert-listener/main/quake_listener.py | python3 -"
   ```
+  Inside a container the REST API listens on `0.0.0.0` automatically so the published port works; `127.0.0.1:` in `-p` keeps it off your LAN.
 
 ---
 
@@ -65,8 +68,8 @@ Run directly in your terminal to launch a temporary local bridge on port 8990. T
 git clone https://github.com/Juanipis/quake-alert-listener.git
 cd quake-alert-listener
 
-# Run with your base coordinates (example: San Francisco, CA)
-python3 quake_listener.py --lat 37.7749 --lon -122.4194 --name "San Francisco, CA"
+# Run with your base coordinates (replace the placeholders with your own values)
+python3 quake_listener.py --lat <your-lat> --lon <your-lon> --name "Base Station"
 ```
 
 ### 2. Verify Connection in 1 Second
@@ -80,8 +83,8 @@ python3 quake_listener.py --test-ping
 Expected output:
 ```text
 [2026-10-07 10:20:12] Testing TLS connection to mtalk.google.com:5228...
-[2026-10-07 10:20:13] Authenticated via MCS v41 (Handshake: 34.2 ms).
-[2026-10-07 10:20:13] Test completed! Handshake latency: 34.2 ms. Connection verified.
+[2026-10-07 10:20:13] Authenticated with mtalk.google.com:5228 (Handshake latency: 358.1 ms)
+[2026-10-07 10:20:13] Test completed! Handshake latency: 358.1 ms, heartbeat round-trip: 77.5 ms. Connection verified.
 ```
 
 ---
@@ -95,11 +98,16 @@ Expected output:
 | `--name` | `QUAKE_NAME` | `Base Station` | Human-readable location name |
 | `--ping-interval` | `QUAKE_PING_INTERVAL` | `120` | Interval in seconds between pings (30 to 600s) |
 | `--http-port` | `QUAKE_HTTP_PORT` | `8990` | Local HTTP REST server port for Home Assistant |
+| `--http-host` | `QUAKE_HTTP_HOST` | `127.0.0.1` | Interface the REST server binds to (`0.0.0.0` automatically inside Docker/Podman). Use `0.0.0.0` to reach it from other machines or Docker networks |
+| `--allowed-origins` | `QUAKE_ALLOWED_ORIGINS` | `https://juanipis.github.io` | Comma-separated browser origins allowed to use the REST API (`*` = any). Loopback origins and non-browser clients (curl, Home Assistant) are always allowed |
 | `--no-http` | - | `False` | Disable the local HTTP REST telemetry server |
-| `--webhook-url` | `QUAKE_WEBHOOK_URL` | *None* | Destination webhook URL (e.g. Home Assistant) |
-| `--webhook-secret` | `QUAKE_WEBHOOK_SECRET` | *None* | Optional secret key for HMAC-SHA256 payload signing |
+| `--webhook-url` | `QUAKE_WEBHOOK_URL` | *None* | Destination webhook URL (e.g. Home Assistant), `http://` or `https://` |
+| `--webhook-secret` | `QUAKE_WEBHOOK_SECRET` | *None* | Optional secret key for HMAC-SHA256 payload signing (prefer the env var: CLI args are visible in `ps`) |
+| `--credentials-file` | `QUAKE_CREDENTIALS_FILE` | `~/.quake_device_credentials.json` | Where the anonymous device identity is stored (written with `0600` permissions) |
+| `--locale` / `--timezone` | `QUAKE_LOCALE` / `QUAKE_TIMEZONE` | `en_US` / `UTC` | Values sent once when registering the anonymous device |
 | `--test-ping` | - | - | Executes a single diagnostic ping and exits |
 | `--simulate` | - | - | Tests internal Protobuf event decoding |
+| `--version` | - | - | Prints the listener version |
 
 ---
 
@@ -113,10 +121,10 @@ The listener exposes a local REST telemetry API (`http://127.0.0.1:8990/status`)
   "source": "Android AEAS (MCS)",
   "id": "aeas-1791386413",
   "magnitude": 5.4,
-  "distance_km": 42.1,
-  "lat": 37.77,
-  "lon": -122.41,
-  "place": "M5.4 at 42.1 km from Base Station (Test Region)",
+  "distance_km": 43.4,
+  "lat": 0.3,
+  "lon": 0.25,
+  "place": "M5.4 at 43.4 km from Base Station (Test Region)",
   "timestamp": "2026-10-07 10:20:13",
   "status": "early alert"
 }
@@ -126,6 +134,16 @@ In the [`homeassistant/`](homeassistant/) directory, you will find ready-to-use 
 - `configuration.yaml`: REST sensors to track connection status, latency, pings, and service commands.
 - `automations.yaml`: Safe light automation and critical push notification triggers.
 - `dashboard.yaml`: Modern Lovelace dashboard card with real-time status and interactive test buttons.
+
+Webhooks are sent from a background thread (so the MCS connection never stalls) and retried up to 3 times on network errors or HTTP 5xx. With `--webhook-secret`, every request carries an `X-Quake-Signature` header: the hex HMAC-SHA256 of the raw body. `latency_ms` in `/status` and `POST /ping` is the measured heartbeat round-trip to Google's server.
+
+### 🔒 Networking & Security
+
+- **Local by default:** the REST API binds to `127.0.0.1`, so only this machine can reach it. This works as-is when Home Assistant runs on the same host (including Docker with `network_mode: host`).
+- **Home Assistant in another container or machine:** start the listener with `--http-host 0.0.0.0` (or set `QUAKE_HTTP_HOST=0.0.0.0`) and point the REST sensors at the host's IP. Only do this on a network you trust: the API has no authentication.
+- **Browser access is restricted:** websites can only call the API if their origin is in `--allowed-origins` (the official web app and `localhost` pages are allowed by default). Other sites get no CORS headers and `403` on `POST /drill` and `/ping`, so a random page can't trigger a drill or read your location. Pass `--allowed-origins "*"` to restore the old allow-all behaviour.
+- **Credentials:** the anonymous device identity is stored with owner-only permissions (`0600`); existing files are tightened automatically. Webhook URLs are masked in logs and in `/status` because Home Assistant webhook IDs act as passwords.
+- **Clean shutdown:** `Ctrl+C`, `SIGTERM` (systemd, `docker stop`) close the MCS connection and the HTTP server cleanly and give in-flight webhooks up to 5 s to finish.
 
 ---
 
