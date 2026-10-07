@@ -958,6 +958,7 @@ EMSC_MAX_EVENT_AGE_S = 15 * 60   # the feed also re-sends updates of old events
 EMSC_PING_EVERY_S = 60
 EMSC_SILENCE_LIMIT_S = 180
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WS_MAX_MESSAGE = 1024 * 1024    # whole (reassembled) message; EMSC events are ~1 KB
 
 
 class MiniWebSocket:
@@ -974,6 +975,7 @@ class MiniWebSocket:
             raise
         self._buf = bytearray()
         self._frag = []
+        self._frag_len = 0
         self.last_rx = time.monotonic()
         try:
             key = base64.b64encode(os.urandom(16)).decode()
@@ -1034,19 +1036,17 @@ class MiniWebSocket:
             if len(b) < 10:
                 return None
             n, pos = struct.unpack(">Q", bytes(b[2:10]))[0], 10
-        if n > MAX_PACKET_SIZE:
-            raise ConnectionError(f"WebSocket frame too large ({n} bytes)")
-        mask = None
+        # Validate before buffering the payload, so a hostile peer can't make us hold much.
         if masked:
-            if len(b) < pos + 4:
-                return None
-            mask, pos = bytes(b[pos:pos + 4]), pos + 4
+            raise ConnectionError("Server sent a masked WebSocket frame (RFC 6455 violation)")
+        if op >= 0x8 and (n > 125 or not fin):
+            raise ConnectionError("Invalid WebSocket control frame")
+        if n > WS_MAX_MESSAGE:
+            raise ConnectionError(f"WebSocket frame too large ({n} bytes)")
         if len(b) < pos + n:
             return None
         data = bytes(b[pos:pos + n])
         del b[:pos + n]
-        if mask:
-            data = bytes(x ^ mask[i % 4] for i, x in enumerate(data))
         return fin, op, data
 
     def _send(self, op, data=b""):
@@ -1078,13 +1078,16 @@ class MiniWebSocket:
                 code = struct.unpack(">H", data[:2])[0] if len(data) >= 2 else None
                 raise ConnectionResetError(f"Server closed the WebSocket (code {code})")
             if op in (0x1, 0x2):
-                self._frag = [data]
+                self._frag, self._frag_len = [data], len(data)
             elif op == 0x0 and self._frag:
                 self._frag.append(data)
+                self._frag_len += len(data)
             else:
                 continue
+            if self._frag_len > WS_MAX_MESSAGE:
+                raise ConnectionError(f"WebSocket message exceeds {WS_MAX_MESSAGE} bytes")
             if fin:
-                msg, self._frag = b"".join(self._frag), []
+                msg, self._frag, self._frag_len = b"".join(self._frag), [], 0
                 return msg.decode("utf-8", errors="replace")
 
     def ping(self):
