@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+    paths: ["quake_listener.py", "tests/**", ".github/workflows/tests.yml"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unittest:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.8", "3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Compile
+        run: python -m py_compile quake_listener.py
+      - name: Unit tests (offline, standard library only)
+        run: python -m unittest discover -s tests -v
+      - name: Synthetic AEAS decode + payload preview
+        run: python quake_listener.py --simulate --lat 0.4 --lon 0.4

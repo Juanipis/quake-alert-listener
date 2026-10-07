@@ -41,7 +41,7 @@ if sys.version_info < (3, 8):  # pragma: no cover - guard for very old interpret
     sys.stderr.write("quake_listener.py requires Python 3.8 or newer.\n")
     sys.exit(1)
 
-__version__ = "1.2.0"
+__version__ = "2.0.0"
 
 HOST_MCS = "mtalk.google.com"
 PORT_MCS = 5228
@@ -421,6 +421,14 @@ def _decode_event(ev):
                 mag = round(num, 1)
 
     region = _pb_text(ev, 8, default="Region")
+    origin_ts, alert_id = None, None
+    meta = _pb_bytes(ev, 1)
+    if meta is not None:
+        meta_p = parse_protobuf(meta)
+        alert_id = _pb_text(meta_p, 3)
+        wire, ms = _pb_first(meta_p, 4)
+        if wire == 0 and isinstance(ms, int) and 946684800000 <= ms <= 4102444800000:  # 2000..2100
+            origin_ts = ms / 1000.0
     epicenter_lat, epicenter_lon, radius_km = None, None, None
 
     geom = _pb_bytes(ev, 6)
@@ -455,6 +463,20 @@ def _decode_event(ev):
         "lat": epicenter_lat,
         "lon": epicenter_lon,
         "radius_km": radius_km,
+        "origin_ts": origin_ts,
+        "alert_id": alert_id,
+    }
+
+
+def aeas_event(ev):
+    """Decoded AEAS event -> common event dict for the DetectionDesk."""
+    return {
+        "source": "Android AEAS (MCS)", "kind": "aeas",
+        "event_id": ev.get("alert_id") or _new_event_id("aeas"), "revision": None,
+        "origin_ts": ev.get("origin_ts"), "lat": ev.get("lat"), "lon": ev.get("lon"),
+        "depth_km": None, "magnitude": ev.get("magnitude"), "magnitude_type": None,
+        "region": ev.get("region"), "radius_km": ev.get("radius_km"), "url": None,
+        "final": None, "cancelled": False, "training": False,
     }
 
 
@@ -484,48 +506,6 @@ def _new_event_id(prefix):
             return f"{base}-{_LAST_EVENT_ID['n']}"
         _LAST_EVENT_ID["base"], _LAST_EVENT_ID["n"] = base, 1
         return base
-
-
-def build_alert_payload(ev, base_name, base_lat, base_lon):
-    """Turn a decoded AEAS event into the webhook / REST payload."""
-    mag = ev.get("magnitude")
-    if mag is None:
-        mag = 4.0
-    lat = ev.get("lat")
-    lon = ev.get("lon")
-    region = ev.get("region") or base_name
-
-    dist = haversine_distance(base_lat, base_lon, lat, lon) if (lat is not None and lon is not None) else None
-    radius = ev.get("radius_km") or 150.0
-    if dist is not None and dist <= radius and mag >= 4.5:
-        level = "alert"
-    elif mag >= 5.0:
-        level = "alert"
-    else:
-        level = "notice"
-    nivel_es = "alerta" if level == "alert" else "aviso"
-
-    place_desc = f"M{mag} at {dist} km from {base_name} ({region})" if dist is not None else f"M{mag} in {region}"
-    now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    return {
-        "level": level,
-        "nivel": nivel_es,
-        "source": "Android AEAS (MCS)",
-        "id": _new_event_id("aeas"),
-        "magnitude": mag,
-        "magnitud": mag,
-        "distance_km": dist,
-        "distancia_km": dist,
-        "lat": lat,
-        "lon": lon,
-        "radius_km": ev.get("radius_km"),
-        "place": place_desc,
-        "lugar": place_desc,
-        "timestamp": now_str,
-        "hora_local": now_str,
-        "status": "early alert"
-    }
 
 
 # ==============================================================================
@@ -812,25 +792,25 @@ STATE = {
         "errors": 0,
         "last_error": None
     },
-    "emsc": {
-        "enabled": False,
-        "connected": False,
-        "events_received": 0,
-        "last_event_ts": None,
-        "connected_since": None,
-        "reconnects": 0,
-        "errors": 0,
-        "last_error": None
-    },
+    "sources": {},
     "last_quake": None,
     "ultimo_sismo": None,
     "total_detections": 0
 }
 
 
-def _update_emsc_state(**kwargs):
+def _new_source_state():
+    return {"enabled": False, "connected": False, "events_received": 0, "last_event_ts": None,
+            "connected_since": None, "reconnects": 0, "errors": 0, "last_error": None}
+
+
+STATE["sources"] = {k: _new_source_state() for k in ("emsc", "wolfx", "shake")}
+STATE["emsc"] = STATE["sources"]["emsc"]   # v1.2 field name, kept for existing clients
+
+
+def _update_source_state(key, **kwargs):
     with STATE_LOCK:
-        STATE["emsc"].update(kwargs)
+        STATE["sources"][key].update(kwargs)
 
 
 def _update_mcs_state(**kwargs):
@@ -871,6 +851,8 @@ def status_snapshot():
             "ubicacion": {"ciudad": loc["name"], "lat": loc["lat"], "lon": loc["lon"]},
             "google_mcs": mcs,
             "emsc": copy.deepcopy(STATE["emsc"]),
+            "sources": copy.deepcopy(STATE["sources"]),
+            "thresholds": copy.deepcopy(STATE.get("thresholds")),
             "last_quake": copy.deepcopy(STATE["last_quake"]),
             "ultimo_sismo": copy.deepcopy(STATE["ultimo_sismo"]),
             "total_detections": STATE["total_detections"],
@@ -954,9 +936,6 @@ def wait_for_webhooks(timeout):
 
 EMSC_HOST = "www.seismicportal.eu"
 EMSC_PATH = "/standing_order/websocket"
-EMSC_MAX_EVENT_AGE_S = 15 * 60   # the feed also re-sends updates of old events
-EMSC_PING_EVERY_S = 60
-EMSC_SILENCE_LIMIT_S = 180
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WS_MAX_MESSAGE = 1024 * 1024    # whole (reassembled) message; EMSC events are ~1 KB
 
@@ -1109,26 +1088,391 @@ class MiniWebSocket:
             pass
 
 
-def _parse_iso_utc(ts):
-    """'2026-01-01T00:00:00.123Z' -> epoch seconds (Python 3.8-safe), or None."""
+def _parse_time(ts, utc_offset_h=0.0):
+    """Timestamp string -> epoch seconds, or None (Python 3.8-safe).
+
+    Accepts ISO 8601 ('2026-01-01T00:00:00.12Z') and the agency formats
+    '2026/01/01 09:00:00' or '2026-01-01 08:00:00', which carry no zone and are
+    interpreted with `utc_offset_h` (JMA uses +9, CENC +8).
+    """
     if not ts:
         return None
     s = str(ts).strip()
-    if s.endswith("Z"):
-        s = s[:-1]
-    s = s.split("+")[0]
+    offset = utc_offset_h
+    if "T" in s:
+        offset = 0.0
+        if s.endswith("Z"):
+            s = s[:-1]
+        elif len(s) > 6 and s[-6] in "+-" and s[-3] == ":":
+            sign = 1 if s[-6] == "+" else -1
+            offset = sign * (int(s[-5:-3]) + int(s[-2:]) / 60.0)
+            s = s[:-6]
+        s = s.replace("T", " ")
+    s = s.replace("/", "-")
     if "." in s:
         whole, frac = s.split(".", 1)
         s = f"{whole}.{(frac + '000000')[:6]}"
     try:
-        d = dt.datetime.strptime(s, "%Y-%m-%dT%H:%M:%S.%f" if "." in s else "%Y-%m-%dT%H:%M:%S")
+        d = dt.datetime.strptime(s, "%Y-%m-%d %H:%M:%S.%f" if "." in s else "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
-    return d.replace(tzinfo=dt.timezone.utc).timestamp()
+    return d.replace(tzinfo=dt.timezone.utc).timestamp() - offset * 3600.0
+
+
+def _parse_iso_utc(ts):
+    return _parse_time(ts, 0.0)
+
+
+def _iso_utc(epoch):
+    if epoch is None:
+        return None
+    return dt.datetime.fromtimestamp(epoch, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ==============================================================================
+# Local impact: estimated intensity at the base station and wave arrival times
+# ==============================================================================
+
+P_WAVE_KMS = 6.0          # typical crustal P-wave speed
+S_WAVE_KMS = 3.5          # typical crustal S-wave speed (the damaging shaking)
+DEFAULT_DEPTH_KM = 10.0   # when a source gives no depth
+MAX_EVENT_AGE_S = 15 * 60  # ignore reports about quakes older than this
+
+# Allen, Wald & Worden (2012), "Intensity attenuation for active crustal regions",
+# J. Seismology 16:409-433. Hypocentral-distance form, the default IPE in USGS ShakeMap:
+#   MMI = c0 + c1*M + c2*ln(sqrt(R^2 + Rm^2)) [+ c4*ln(R/50) for R > 50 km],
+#   Rm = m1 + m2*exp(M - 5)
+_AWW12 = {"c0": 2.085, "c1": 1.428, "c2": -1.402, "c4": 0.078, "m1": -0.209, "m2": 2.042}
+
+MMI_NAMES = ["I · not felt", "II · weak", "III · weak", "IV · light", "V · moderate",
+             "VI · strong", "VII · very strong", "VIII · severe", "IX · violent", "X+ · extreme"]
+
+
+def estimate_mmi(magnitude, hypo_km):
+    """Median Modified Mercalli Intensity expected at `hypo_km` (rough: no site effects)."""
+    c = _AWW12
+    r = max(float(hypo_km), 0.1)
+    rm = c["m1"] + c["m2"] * math.exp(magnitude - 5.0)
+    mmi = c["c0"] + c["c1"] * magnitude + c["c2"] * math.log(math.sqrt(r * r + rm * rm))
+    if r > 50.0:
+        mmi += c["c4"] * math.log(r / 50.0)
+    return max(1.0, min(mmi, 12.0))
+
+
+def mmi_name(mmi):
+    return MMI_NAMES[max(1, min(int(round(mmi)), 10)) - 1]
+
+
+def assess_impact(ev, base_lat, base_lon, now=None):
+    """Distance, estimated intensity and wave ETAs of event `ev` at the base station."""
+    now = time.time() if now is None else now
+    epi = haversine_distance(base_lat, base_lon, ev["lat"], ev["lon"])
+    depth = ev.get("depth_km")
+    depth = DEFAULT_DEPTH_KM if depth is None or depth < 0 else depth
+    hypo = math.sqrt(epi * epi + depth * depth)
+    mag = ev.get("magnitude")
+    mmi = estimate_mmi(mag, hypo) if mag is not None else None
+    origin = ev.get("origin_ts")
+    p_at = origin + hypo / P_WAVE_KMS if origin is not None else None
+    s_at = origin + hypo / S_WAVE_KMS if origin is not None else None
+    return {
+        "distance_km": round(epi, 1),
+        "hypocentral_km": round(hypo, 1),
+        "estimated_mmi": round(mmi, 1) if mmi is not None else None,
+        "p_wave_arrival_ts": round(p_at, 1) if p_at is not None else None,
+        "s_wave_arrival_ts": round(s_at, 1) if s_at is not None else None,
+        "s_wave_eta_s": round(s_at - now, 1) if s_at is not None else None,
+        "age_s": round(now - origin, 1) if origin is not None else None,
+    }
+
+
+# ==============================================================================
+# Detection desk: one policy for every source (AEAS, EEW feeds, EMSC, on-site)
+# ==============================================================================
+#
+# Each source turns what it receives into an "event" dict:
+#   source, kind ('aeas' | 'eew' | 'report' | 'onsite'), event_id, revision,
+#   origin_ts, lat, lon, depth_km, magnitude, magnitude_type, region, url,
+#   final, cancelled, training, agency_intensity, radius_km
+# The desk estimates the local impact, picks a level, merges duplicates of the same
+# quake across sources, and only notifies again when things get worse.
+
+KIND_STATUS = {"aeas": "early alert", "eew": "early warning", "report": "rapid report",
+               "onsite": "on-site trigger"}
+LEVEL_RANK = {None: 0, "notice": 1, "alert": 2}
+
+
+class DetectionDesk:
+    def __init__(self, args, record):
+        self.args = args
+        self.record = record          # callable(payload) -> stores + fires webhook
+        self.lock = threading.Lock()
+        self.sent = collections.OrderedDict()  # key -> dict(level, mmi, origin_ts, lat, lon)
+
+    # -- policy ---------------------------------------------------------------
+    def level_for(self, mmi, ev, impact=None):
+        a = self.args
+        floor = None
+        if ev["kind"] == "aeas":
+            radius = ev.get("radius_km")
+            mag = ev.get("magnitude") or 0
+            if impact and impact["distance_km"] is not None and radius and impact["distance_km"] <= radius and mag >= 4.5:
+                floor = "notice"   # Google itself drew this place inside the impact zone
+        if mmi is None:
+            return floor
+        if mmi >= a.alert_mmi:
+            return "alert"
+        if mmi >= a.notice_mmi:
+            return "notice"
+        return floor
+
+    def _match(self, ev):
+        """Key of an already-notified quake this event belongs to (same or other source)."""
+        own = (ev["source"], ev["event_id"])
+        if own in self.sent:
+            return own
+        o = ev.get("origin_ts")
+        if o is None:
+            return None
+        for key, s in reversed(self.sent.items()):
+            if s["origin_ts"] is None or s["lat"] is None or abs(s["origin_ts"] - o) > 90:
+                continue
+            if haversine_distance(s["lat"], s["lon"], ev["lat"], ev["lon"]) <= 150:
+                return key
+        return None
+
+    # -- entry point ----------------------------------------------------------
+    def submit(self, ev, now=None):
+        """Evaluate one event. Returns the dispatched payload, or None."""
+        a = self.args
+        now = time.time() if now is None else now
+        if ev.get("training"):
+            log(f"{ev['source']}: training message for {ev.get('region') or 'unknown region'}, ignored")
+            return None
+        if ev["kind"] == "onsite":
+            return self._submit_onsite(ev, now)
+
+        mag = ev.get("magnitude")
+        if ev.get("lat") is None or ev.get("lon") is None:
+            return self._submit_unlocated(ev, mag)
+        impact = assess_impact(ev, a.lat, a.lon, now)
+        with self.lock:
+            key = self._match(ev)
+            prev = self.sent.get(key) if key else None
+
+            if ev.get("cancelled"):
+                if prev is None:
+                    return None
+                del self.sent[key]
+                payload = self._payload(ev, impact, "cancel")
+                log(f"{ev['source']}: warning for {ev.get('region') or 'event'} was CANCELLED")
+                self.record(payload)
+                return payload
+
+            if impact["age_s"] is not None and impact["age_s"] > MAX_EVENT_AGE_S:
+                return None
+            if mag is not None and mag < a.min_magnitude:
+                return None
+            if impact["distance_km"] > a.max_distance_km:
+                return None
+
+            level = self.level_for(impact["estimated_mmi"], ev, impact)
+            if level is None:
+                return None
+            if prev is not None:
+                worse = (LEVEL_RANK[level] > LEVEL_RANK[prev["level"]] or
+                         (impact["estimated_mmi"] or 0) >= (prev["mmi"] or 0) + 1.0)
+                if not worse:
+                    return None
+            self.sent[key or (ev["source"], ev["event_id"])] = {
+                "level": level, "mmi": impact["estimated_mmi"], "origin_ts": ev.get("origin_ts"),
+                "lat": ev["lat"], "lon": ev["lon"],
+            }
+            while len(self.sent) > 500:
+                self.sent.popitem(last=False)
+            payload = self._payload(ev, impact, level)
+        self.record(payload)
+        return payload
+
+    def _submit_unlocated(self, ev, mag):
+        """An alert without coordinates (possible for AEAS): fall back to magnitude only."""
+        if mag is None or mag < max(4.0, self.args.min_magnitude):
+            return None
+        level = "alert" if mag >= 5.0 else "notice"
+        key = (ev["source"], ev["event_id"])
+        with self.lock:
+            if key in self.sent:
+                return None
+            self.sent[key] = {"level": level, "mmi": None, "origin_ts": None, "lat": None, "lon": None}
+        impact = {"distance_km": None, "hypocentral_km": None, "estimated_mmi": None,
+                  "p_wave_arrival_ts": None, "s_wave_arrival_ts": None, "s_wave_eta_s": None, "age_s": None}
+        payload = self._payload(ev, impact, level)
+        self.record(payload)
+        return payload
+
+    def _submit_onsite(self, ev, now):
+        a = self.args
+        level = "alert" if a.shake_alert_counts and ev.get("peak_counts", 0) >= a.shake_alert_counts else "notice"
+        impact = {"distance_km": 0.0, "hypocentral_km": None, "estimated_mmi": None,
+                  "p_wave_arrival_ts": round(now, 1), "s_wave_arrival_ts": None,
+                  "s_wave_eta_s": None, "age_s": None}
+        payload = self._payload(ev, impact, level)
+        self.record(payload)
+        return payload
+
+    # -- payload --------------------------------------------------------------
+    def _payload(self, ev, impact, level):
+        a = self.args
+        mag = ev.get("magnitude")
+        mmi = impact["estimated_mmi"]
+        region = ev.get("region") or (f"{ev['lat']:.2f}, {ev['lon']:.2f}" if ev.get("lat") is not None else "unknown location")
+        if ev["kind"] == "onsite":
+            place = f"On-site P-wave trigger at {a.name} ({ev.get('detail', 'STA/LTA')})"
+        else:
+            bits = [f"M{mag}" if mag is not None else "Earthquake", region]
+            if impact["distance_km"] is not None:
+                bits.append(f"{impact['distance_km']:g} km from {a.name}")
+            if mmi is not None:
+                bits.append(f"est. MMI {mmi_name(mmi).split(' · ')[0]}")
+            eta = impact["s_wave_eta_s"]
+            if eta is not None and eta > 0:
+                bits.append(f"S-wave in {int(eta)} s")
+            place = " · ".join(bits)
+        nivel = {"alert": "alerta", "notice": "aviso", "cancel": "cancelado"}.get(level, level)
+        now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        status = "cancelled" if level == "cancel" else KIND_STATUS.get(ev["kind"], "report")
+        return {
+            "level": level,
+            "nivel": nivel,
+            "source": ev["source"],
+            "kind": ev["kind"],
+            "status": status,
+            "id": f"{ev['kind']}-{ev['event_id']}",
+            "event_id": ev["event_id"],
+            "revision": ev.get("revision"),
+            "final": ev.get("final"),
+            "magnitude": mag,
+            "magnitud": mag,
+            "magnitude_type": ev.get("magnitude_type"),
+            "lat": ev.get("lat"),
+            "lon": ev.get("lon"),
+            "depth_km": ev.get("depth_km"),
+            "radius_km": ev.get("radius_km"),
+            "region": ev.get("region"),
+            "distance_km": impact["distance_km"],
+            "distancia_km": impact["distance_km"],
+            "hypocentral_km": impact["hypocentral_km"],
+            "estimated_mmi": mmi,
+            "mmi_label": mmi_name(mmi) if mmi is not None else None,
+            "agency_intensity": ev.get("agency_intensity"),
+            "origin_time": _iso_utc(ev.get("origin_ts")),
+            "report_delay_s": impact["age_s"],
+            "p_wave_arrival_ts": impact["p_wave_arrival_ts"],
+            "s_wave_arrival_ts": impact["s_wave_arrival_ts"],
+            "s_wave_eta_s": impact["s_wave_eta_s"],
+            "place": place,
+            "lugar": place,
+            "url": ev.get("url"),
+            "timestamp": now_str,
+            "hora_local": now_str,
+        }
+
+
+def describe_event(ev, impact):
+    """One log line for an incoming event (used by all network sources)."""
+    mag = f"M{ev['magnitude']}" if ev.get("magnitude") is not None else "M?"
+    where = ev.get("region") or f"{ev['lat']:.2f}, {ev['lon']:.2f}"
+    depth = f", depth {ev['depth_km']:g} km" if ev.get("depth_km") is not None else ""
+    mmi = f" · est. MMI {mmi_name(impact['estimated_mmi']).split(' · ')[0]}" if impact.get("estimated_mmi") else ""
+    return f"{mag} {where}{depth}, {impact['distance_km']:.0f} km away{mmi}"
+
+
+# ==============================================================================
+# Push sources over WebSocket: EMSC (reports) and Wolfx (official EEW relays)
+# ==============================================================================
+
+SOURCE_PING_EVERY_S = 60
+SOURCE_SILENCE_LIMIT_S = 180
+
+
+class WebSocketSource(threading.Thread):
+    """Follows one WebSocket feed with reconnect/backoff; subclasses parse messages."""
+    key = "source"
+    label = "Source"
+    host = ""
+    path = "/"
+
+    def __init__(self, args, desk):
+        super().__init__(name=f"{self.key}-feed", daemon=True)
+        self.args = args
+        self.desk = desk
+
+    def events_from(self, text):
+        raise NotImplementedError
+
+    def handle(self, text):
+        for ev in self.events_from(text) or ():
+            with STATE_LOCK:
+                st = STATE["sources"][self.key]
+                st["events_received"] += 1
+                st["last_event_ts"] = time.time()
+            impact = assess_impact(ev, self.args.lat, self.args.lon)
+            if self.worth_logging(ev, impact):
+                log(f"{self.log_prefix(ev)}: {describe_event(ev, impact)}")
+            self.desk.submit(ev)
+
+    def worth_logging(self, ev, impact):
+        return True
+
+    def log_prefix(self, ev):
+        return self.label
+
+    def run(self):
+        backoff = BACKOFF_MIN_S
+        while not STOP_EVENT.is_set():
+            ws, started, reason = None, None, "connection closed"
+            try:
+                ws = MiniWebSocket(self.host, self.path)
+                started = time.monotonic()
+                _update_source_state(self.key, connected=True, connected_since=time.time())
+                log(f"Connected to {self.label} (wss://{self.host}{self.path})")
+                last_ping = time.monotonic()
+                while not STOP_EVENT.is_set():
+                    text = ws.recv_message()
+                    if text is not None:
+                        try:
+                            self.handle(text)
+                        except Exception as e:  # one bad message must not drop the feed
+                            log(f"{self.label}: skipped a message that could not be processed: {e}")
+                    now = time.monotonic()
+                    if now - last_ping >= SOURCE_PING_EVERY_S:
+                        ws.ping()
+                        last_ping = now
+                    if now - ws.last_rx > SOURCE_SILENCE_LIMIT_S:
+                        raise ConnectionError(f"feed silent for {SOURCE_SILENCE_LIMIT_S} s")
+            except Exception as e:
+                reason = str(e) or e.__class__.__name__
+                with STATE_LOCK:
+                    STATE["sources"][self.key]["errors"] += 1
+                    STATE["sources"][self.key]["last_error"] = reason
+            finally:
+                if ws is not None:
+                    ws.close()
+                _update_source_state(self.key, connected=False)
+            if STOP_EVENT.is_set():
+                break
+            if started is not None and time.monotonic() - started >= STABLE_SESSION_S:
+                backoff = BACKOFF_MIN_S
+            delay = round(backoff + random.uniform(0, backoff * 0.25), 1)
+            log(f"{self.label}: {reason}. Reconnecting in {delay}s...")
+            with STATE_LOCK:
+                STATE["sources"][self.key]["reconnects"] += 1
+            STOP_EVENT.wait(delay)
+            backoff = min(backoff * 2, BACKOFF_MAX_S)
 
 
 def emsc_event_from_message(text):
-    """Flatten one SeismicPortal message, or None if it is not a usable event."""
+    """Flatten one SeismicPortal message into the common event dict, or None."""
     try:
         msg = json.loads(text)
     except ValueError:
@@ -1146,134 +1490,301 @@ def emsc_event_from_message(text):
         depth = round(float(props.get("depth")), 1)
     except (TypeError, ValueError):
         depth = None
-    region = str(props.get("flynn_region") or "").strip().title() or None
+    unid = str(props.get("unid") or f"{lat:.3f},{lon:.3f},{props.get('time')}")
     return {
+        "source": "EMSC",
+        "kind": "report",
         "action": str(msg.get("action") or "update"),
-        "unid": str(props.get("unid") or f"{lat:.3f},{lon:.3f},{props.get('time')}"),
-        "magnitude": round(mag, 1),
-        "magtype": props.get("magtype"),
+        "event_id": unid,
+        "unid": unid,
+        "revision": props.get("lastupdate"),
+        "origin_ts": _parse_iso_utc(props.get("time")),
+        "time": props.get("time"),
         "lat": lat,
         "lon": lon,
         "depth_km": depth,
-        "region": region,
-        "time": props.get("time"),
+        "magnitude": round(mag, 1),
+        "magnitude_type": props.get("magtype"),
+        "region": str(props.get("flynn_region") or "").strip().title() or None,
         "authority": props.get("auth"),
+        "url": f"https://www.seismicportal.eu/eventdetails.html?unid={urllib.parse.quote(unid)}",
+        "final": None,
+        "cancelled": False,
+        "training": False,
     }
 
 
-def build_emsc_payload(ev, dist_km, age_s, base_name):
-    """Webhook / REST payload for an EMSC event (same core fields as AEAS alerts)."""
-    mag = ev["magnitude"]
-    level = "alert" if mag >= 4.5 else "notice"
-    region = ev["region"] or f"{ev['lat']:.2f}, {ev['lon']:.2f}"
-    place = f"M{mag} {region}, {dist_km} km from {base_name}"
-    now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return {
-        "level": level,
-        "nivel": "alerta" if level == "alert" else "aviso",
-        "source": "EMSC SeismicPortal",
-        "id": f"emsc-{ev['unid']}",
-        "magnitude": mag,
-        "magnitud": mag,
-        "magnitude_type": ev.get("magtype"),
-        "distance_km": dist_km,
-        "distancia_km": dist_km,
-        "lat": ev["lat"],
-        "lon": ev["lon"],
-        "depth_km": ev.get("depth_km"),
-        "radius_km": None,
-        "region": ev["region"],
-        "place": place,
-        "lugar": place,
-        "event_time": ev.get("time"),
-        "report_delay_s": round(age_s) if age_s is not None else None,
-        "timestamp": now_str,
-        "hora_local": now_str,
-        "status": "rapid report",
-        "url": f"https://www.seismicportal.eu/eventdetails.html?unid={urllib.parse.quote(ev['unid'])}",
-    }
+class EMSCSource(WebSocketSource):
+    key = "emsc"
+    label = "EMSC"
+    host = EMSC_HOST
+    path = EMSC_PATH
 
-
-class EMSCFeed(threading.Thread):
-    """Follows the EMSC WebSocket and reports events near the base station."""
-
-    def __init__(self, args, on_detection):
-        super().__init__(name="emsc-feed", daemon=True)
-        self.args = args
-        self.on_detection = on_detection
-        self.dispatched = collections.OrderedDict()  # unid -> magnitude already reported
-
-    def handle(self, text):
+    def events_from(self, text):
         ev = emsc_event_from_message(text)
-        if ev is None:
-            return
-        a = self.args
+        return [ev] if ev else []
+
+    def worth_logging(self, ev, impact):
+        # The feed is global; only log what could matter here or is big anywhere.
+        return (impact["estimated_mmi"] or 0) >= 2.0 or (ev["magnitude"] or 0) >= 5.0
+
+    def log_prefix(self, ev):
+        return f"EMSC {ev['action']}"
+
+
+# Wolfx relays official early warnings as JSON over one WebSocket (wolfx.jp, free for
+# non-abusive use). Times are local to the issuing agency.
+WOLFX_HOST = "ws-api.wolfx.jp"
+WOLFX_PATH = "/all_eew"
+WOLFX_FEEDS = {
+    #  type        label                 agency UTC offset
+    "jma_eew": ("JMA EEW", 9.0),        # Japan Meteorological Agency
+    "cenc_eew": ("CENC EEW", 8.0),      # China Earthquake Networks Center
+    "sc_eew": ("Sichuan EEW", 8.0),
+    "fj_eew": ("Fujian EEW", 8.0),
+    "cq_eew": ("Chongqing EEW", 8.0),
+}
+
+
+def _num(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else f
+
+
+def wolfx_event_from_message(text):
+    """Flatten one Wolfx EEW message into the common event dict, or None."""
+    try:
+        m = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(m, dict) or m.get("type") not in WOLFX_FEEDS:
+        return None  # heartbeats, earthquake lists, unknown feeds
+    label, offset = WOLFX_FEEDS[m["type"]]
+    lat, lon = _num(m.get("Latitude")), _num(m.get("Longitude"))
+    mag = _num(m.get("Magnitude", m.get("Magunitude")))
+    if lat is None or lon is None or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    serial = m.get("Serial", m.get("ReportNum"))
+    event_id = str(m.get("EventID") or m.get("ID") or f"{lat:.2f},{lon:.2f},{m.get('OriginTime')}")
+    depth = _num(m.get("Depth"))
+    return {
+        "source": label,
+        "kind": "eew",
+        "event_id": f"{m['type']}:{event_id}",
+        "revision": serial,
+        "origin_ts": _parse_time(m.get("OriginTime"), offset),
+        "lat": lat,
+        "lon": lon,
+        "depth_km": depth,
+        "magnitude": round(mag, 1) if mag is not None else None,
+        "magnitude_type": None,
+        "region": m.get("Hypocenter") or m.get("HypoCenter"),
+        "agency_intensity": str(m["MaxIntensity"]) if m.get("MaxIntensity") not in (None, "") else None,
+        "url": None,
+        "final": bool(m.get("isFinal")) if "isFinal" in m else None,
+        "cancelled": bool(m.get("isCancel")),
+        "training": bool(m.get("isTraining")),
+    }
+
+
+class WolfxSource(WebSocketSource):
+    key = "wolfx"
+    label = "Wolfx EEW"
+    host = WOLFX_HOST
+    path = WOLFX_PATH
+
+    def events_from(self, text):
+        ev = wolfx_event_from_message(text)
+        return [ev] if ev else []
+
+    def log_prefix(self, ev):
+        rev = f" #{ev['revision']}" if ev.get("revision") is not None else ""
+        final = " (final)" if ev.get("final") else ""
+        return f"{ev['source']}{rev}{final}"
+
+
+# ==============================================================================
+# On-site detection: Raspberry Shake UDP datacast + STA/LTA P-wave trigger
+# ==============================================================================
+#
+# A Raspberry Shake (or anything speaking its datacast format) streams packets like
+#   {'EHZ', 1700000000.120, 17, -4, 12, ...}
+# to a UDP port. A recursive STA/LTA on the vertical channel catches the P-wave on
+# site, which is the only kind of early warning that works where no network issues
+# public EEWs. It cannot tell a quake from a slammed door by itself: pick thresholds
+# for your floor, and treat a lone trigger as "notice" unless it is strong.
+
+SHAKE_STA_S = 1.0
+SHAKE_LTA_S = 30.0
+SHAKE_HOLDOFF_S = 30.0
+
+
+def parse_shake_packet(data):
+    """b"{'EHZ', 1700000000.12, 1, 2, 3}" -> ('EHZ', 1700000000.12, [1, 2, 3]) or None."""
+    try:
+        text = data.decode("ascii", errors="ignore").strip()
+    except AttributeError:
+        return None
+    if not (text.startswith("{") and text.endswith("}")):
+        return None
+    parts = [p.strip() for p in text[1:-1].split(",")]
+    if len(parts) < 3:
+        return None
+    channel = parts[0].strip("'\" ")
+    try:
+        t0 = float(parts[1])
+        samples = [float(p) for p in parts[2:] if p]
+    except ValueError:
+        return None
+    if not channel or not samples:
+        return None
+    return channel, t0, samples
+
+
+class StaLtaDetector:
+    """Recursive STA/LTA on a squared, de-meaned signal (Withers et al., 1998)."""
+
+    def __init__(self, on_ratio, off_ratio, sta_s=SHAKE_STA_S, lta_s=SHAKE_LTA_S, holdoff_s=SHAKE_HOLDOFF_S):
+        self.on, self.off = on_ratio, off_ratio
+        self.sta_s, self.lta_s, self.holdoff_s = sta_s, lta_s, holdoff_s
+        self.sta = self.lta = self.mean = 0.0
+        self.n = 0
+        self.rate = None
+        self.triggered = False
+        self.last_trigger_t = -1e18
+        self.peak = 0.0
+        self.max_ratio = 0.0
+
+    def feed(self, t0, samples, rate):
+        """Process one packet. Returns a trigger dict when a new trigger starts."""
+        self.rate = rate
+        a_sta = 1.0 / max(1.0, self.sta_s * rate)
+        a_lta = 1.0 / max(1.0, self.lta_s * rate)
+        a_mean = 1.0 / max(1.0, 60.0 * rate)
+        warm = self.lta_s * rate
+        fired = None
+        for i, x in enumerate(samples):
+            self.n += 1
+            if self.n == 1:
+                self.mean = x
+            self.mean += (x - self.mean) * a_mean
+            y = x - self.mean
+            cf = y * y
+            self.sta += (cf - self.sta) * a_sta
+            self.lta += (cf - self.lta) * a_lta
+            if self.n < warm or self.lta <= 0:
+                continue
+            ratio = self.sta / self.lta
+            t = t0 + i / rate
+            if self.triggered:
+                self.peak = max(self.peak, abs(y))
+                self.max_ratio = max(self.max_ratio, ratio)
+                if ratio < self.off:
+                    self.triggered = False
+            elif ratio >= self.on and t - self.last_trigger_t >= self.holdoff_s:
+                self.triggered = True
+                self.last_trigger_t = t
+                self.peak, self.max_ratio = abs(y), ratio
+                fired = {"t": t, "ratio": round(ratio, 1)}
+        return fired
+
+
+class ShakeSource(threading.Thread):
+    key = "shake"
+    label = "Raspberry Shake"
+
+    def __init__(self, args, desk):
+        super().__init__(name="shake-udp", daemon=True)
+        self.args = args
+        self.desk = desk
+        host, _, port = args.shake_udp.rpartition(":")
+        self.bind = (host or "0.0.0.0", int(port))
+        self.detector = StaLtaDetector(args.shake_sta_lta_on, args.shake_sta_lta_off)
+        self.channel = args.shake_channel
+        self.last_t = None
+        self.pending = None   # trigger waiting to collect its peak amplitude
+
+    def pick_channel(self, ch):
+        if self.channel:
+            return ch == self.channel
+        # auto: first vertical channel seen (EHZ geophone, ENZ accelerometer, SHZ ...)
+        if ch.endswith("Z"):
+            self.channel = ch
+            log(f"Raspberry Shake: using channel {ch}")
+            return True
+        return False
+
+    def process(self, data, now=None):
+        pkt = parse_shake_packet(data)
+        if pkt is None:
+            return None
+        ch, t0, samples = pkt
+        if not self.pick_channel(ch):
+            return None
         with STATE_LOCK:
-            STATE["emsc"]["events_received"] += 1
-            STATE["emsc"]["last_event_ts"] = time.time()
-        dist = round(haversine_distance(a.lat, a.lon, ev["lat"], ev["lon"]), 1)
-        t = _parse_iso_utc(ev["time"])
-        age = time.time() - t if t is not None else None
-        near = dist <= a.emsc_radius_km
-        if near or ev["magnitude"] >= 5.0:
-            where = ev["region"] or f"{ev['lat']:.2f}, {ev['lon']:.2f}"
-            log(f"EMSC {ev['action']}: M{ev['magnitude']} {where}, depth {ev['depth_km']} km, "
-                f"{dist:.0f} km from {a.name}")
-        if not near or ev["magnitude"] < a.emsc_min_mag:
-            return
-        if age is not None and age > EMSC_MAX_EVENT_AGE_S:
-            log(f"EMSC: update of an event from {int(age // 60)} min ago, not dispatched")
-            return
-        prev = self.dispatched.get(ev["unid"])
-        if prev is not None and ev["magnitude"] < prev + 0.5:
-            return  # already reported; only re-report a big magnitude revision
-        self.dispatched[ev["unid"]] = ev["magnitude"]
-        while len(self.dispatched) > 500:
-            self.dispatched.popitem(last=False)
-        self.on_detection(build_emsc_payload(ev, dist, age, a.name))
+            st = STATE["sources"]["shake"]
+            st["connected"] = True
+            st["events_received"] += 1
+            st["last_event_ts"] = time.time()
+        rate = 100.0
+        if self.last_t is not None and t0 > self.last_t:
+            est = len(samples) / (t0 - self.last_t)
+            if 10 <= est <= 1000:
+                rate = est
+        self.last_t = t0
+        fired = self.detector.feed(t0, samples, rate)
+        dispatched = None
+        if self.pending and (not self.detector.triggered or t0 - self.pending["t"] > 3.0):
+            dispatched = self._dispatch(self.pending)
+            self.pending = None
+        if fired:
+            self.pending = fired
+        return dispatched
+
+    def _dispatch(self, trig):
+        peak = round(self.detector.peak, 1)
+        ratio = max(trig["ratio"], round(self.detector.max_ratio, 1))
+        log(f"Raspberry Shake: P-wave trigger on {self.channel} (STA/LTA {ratio}, peak {peak:g} counts)")
+        ev = {
+            "source": "Raspberry Shake", "kind": "onsite",
+            "event_id": f"{self.channel}-{int(trig['t'])}", "revision": None,
+            "origin_ts": None, "lat": self.args.lat, "lon": self.args.lon, "depth_km": None,
+            "magnitude": None, "magnitude_type": None, "region": None, "url": None,
+            "final": None, "cancelled": False, "training": False,
+            "peak_counts": peak, "detail": f"{self.channel}, STA/LTA {ratio}, peak {peak:g} counts",
+        }
+        return self.desk.submit(ev)
 
     def run(self):
-        backoff = BACKOFF_MIN_S
-        while not STOP_EVENT.is_set():
-            ws, started, reason = None, None, "connection closed"
-            try:
-                ws = MiniWebSocket(EMSC_HOST, EMSC_PATH)
-                started = time.monotonic()
-                _update_emsc_state(connected=True, connected_since=time.time())
-                log(f"Connected to EMSC real-time feed (wss://{EMSC_HOST}{EMSC_PATH})")
-                last_ping = time.monotonic()
-                while not STOP_EVENT.is_set():
-                    text = ws.recv_message()
-                    if text is not None:
-                        try:
-                            self.handle(text)
-                        except Exception as e:  # one bad event must not drop the feed
-                            log(f"EMSC: skipped an event that could not be processed: {e}")
-                    now = time.monotonic()
-                    if now - last_ping >= EMSC_PING_EVERY_S:
-                        ws.ping()
-                        last_ping = now
-                    if now - ws.last_rx > EMSC_SILENCE_LIMIT_S:
-                        raise ConnectionError(f"EMSC feed silent for {EMSC_SILENCE_LIMIT_S} s")
-            except Exception as e:
-                reason = str(e) or e.__class__.__name__
-                with STATE_LOCK:
-                    STATE["emsc"]["errors"] += 1
-                    STATE["emsc"]["last_error"] = reason
-            finally:
-                if ws is not None:
-                    ws.close()
-                _update_emsc_state(connected=False)
-            if STOP_EVENT.is_set():
-                break
-            if started is not None and time.monotonic() - started >= STABLE_SESSION_S:
-                backoff = BACKOFF_MIN_S
-            delay = round(backoff + random.uniform(0, backoff * 0.25), 1)
-            log(f"EMSC feed: {reason}. Reconnecting in {delay}s...")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(self.bind)
+            sock.settimeout(1.0)
+        except OSError as e:
+            log(f"Raspberry Shake: cannot listen on UDP {self.bind[0]}:{self.bind[1]}: {e}")
             with STATE_LOCK:
-                STATE["emsc"]["reconnects"] += 1
-            STOP_EVENT.wait(delay)
-            backoff = min(backoff * 2, BACKOFF_MAX_S)
+                STATE["sources"]["shake"]["last_error"] = str(e)
+            return
+        log(f"Raspberry Shake: listening for datacast on UDP {self.bind[0]}:{self.bind[1]}")
+        try:
+            while not STOP_EVENT.is_set():
+                try:
+                    data, _ = sock.recvfrom(8192)
+                except socket.timeout:
+                    with STATE_LOCK:
+                        last = STATE["sources"]["shake"]["last_event_ts"]
+                        if last and time.time() - last > 30:
+                            STATE["sources"]["shake"]["connected"] = False
+                    continue
+                try:
+                    self.process(data)
+                except Exception as e:
+                    log(f"Raspberry Shake: skipped a packet: {e}")
+        finally:
+            sock.close()
 
 
 def _is_loopback_origin(origin):
@@ -1657,13 +2168,16 @@ def run_listener(args):
             STATE["last_quake"] = payload
             STATE["ultimo_sismo"] = payload
             STATE["total_detections"] += 1
-        log(f"🚨 EARTHQUAKE ALERT DETECTED! {payload['place']} "
-            f"(Level: {payload['level']}, source: {payload['source']})")
+        icon = {"alert": "🚨 ", "cancel": "✖ "}.get(payload["level"], "")
+        log(f"{icon}EARTHQUAKE {payload['level'].upper()} ({payload['status']}, {payload['source']}): "
+            f"{payload['place']}")
         if args.webhook_url:
             dispatch_webhook_async(payload)
 
+    desk = DetectionDesk(args, record_detection)
+
     def dispatch_alert(ev):
-        record_detection(build_alert_payload(ev, args.name, args.lat, args.lon))
+        desk.submit(aeas_event(ev))
 
     log(f"Starting Quake MCS Listener v{__version__} at {args.name} ({args.lat}, {args.lon})")
     if not 30 <= args.ping_interval <= 600:
@@ -1672,17 +2186,29 @@ def run_listener(args):
         f"Webhook: {redact_url(args.webhook_url) if args.webhook_url else 'Disabled'}"
         f"{' (HMAC signed)' if args.webhook_url and args.webhook_secret else ''}")
 
-    if not args.no_emsc:
-        _update_emsc_state(enabled=True)
-        log(f"EMSC source on: events of M{args.emsc_min_mag}+ within {args.emsc_radius_km:g} km "
-            f"trigger the webhook (rapid reports, not early warnings)")
-        if args.lat == 0.0 and args.lon == 0.0:
-            log("Note: base station is at 0.0, 0.0. Set --lat/--lon so nearby EMSC events count.")
-        EMSCFeed(args, record_detection).start()
+    with STATE_LOCK:
+        STATE["thresholds"] = {"notice_mmi": args.notice_mmi, "alert_mmi": args.alert_mmi,
+                               "min_magnitude": args.min_magnitude, "max_distance_km": args.max_distance_km}
+    log(f"Sources: {', '.join(sorted(args.sources))} | notify at est. MMI {args.notice_mmi:g}+, "
+        f"alert at MMI {args.alert_mmi:g}+")
+    if args.lat == 0.0 and args.lon == 0.0:
+        log("Note: base station is at 0.0, 0.0. Set --lat/--lon so intensity and S-wave "
+            "countdowns are computed for where you actually are.")
+    for key, cls in (("emsc", EMSCSource), ("wolfx", WolfxSource)):
+        if key in args.sources:
+            _update_source_state(key, enabled=True)
+            cls(args, desk).start()
+    if args.shake_udp:
+        _update_source_state("shake", enabled=True)
+        ShakeSource(args, desk).start()
 
     client = None
     backoff = BACKOFF_MIN_S
     try:
+        if "mcs" not in args.sources:
+            log("Google MCS source disabled (--sources); following the other feeds only.")
+            while not STOP_EVENT.is_set():
+                STOP_EVENT.wait(1.0)
         while not STOP_EVENT.is_set():
             session_start = None
             reason = None
@@ -1761,9 +2287,13 @@ def simulate_alert(args=None):
         f"Region={ev['region']}, Epicenter=({ev['lat']}, {ev['lon']}), Radius={ev['radius_km']} km")
     print(json.dumps(ev, indent=2))
     if args is not None:
-        preview = build_alert_payload(ev, args.name, args.lat, args.lon)
-        log("Webhook payload that would be sent (not dispatched):")
-        print(json.dumps(preview, indent=2, ensure_ascii=False))
+        preview = DetectionDesk(args, lambda p: None).submit(aeas_event(ev))
+        if preview is None:
+            log(f"At {args.name} this synthetic event stays below the notification thresholds "
+                f"(--notice-mmi {args.notice_mmi:g}); nothing would be sent.")
+        else:
+            log("Webhook payload that would be sent (not dispatched):")
+            print(json.dumps(preview, indent=2, ensure_ascii=False))
     return 0 if ok else 1
 
 
@@ -1843,6 +2373,27 @@ def _origins(s):
     return set(items)
 
 
+def _sources(s):
+    items = {x.strip().lower() for x in (s or "").split(",") if x.strip()}
+    unknown = items - {"mcs", "emsc", "wolfx"}
+    if unknown:
+        raise argparse.ArgumentTypeError(f"unknown source(s): {', '.join(sorted(unknown))} (use mcs, emsc, wolfx)")
+    return items
+
+
+def _udp_endpoint(s):
+    s = (s or "").strip()
+    if not s:
+        return ""
+    host, _, port = s.rpartition(":")
+    try:
+        if not 1 <= int(port) <= 65535:
+            raise ValueError
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid UDP endpoint {s!r} (expected [host:]port, e.g. 8888)")
+    return f"{host}:{int(port)}" if host else f":{int(port)}"
+
+
 def _hosts(s):
     return {h.strip().lower().rstrip(".") for h in (s or "").split(",") if h.strip()}
 
@@ -1868,9 +2419,17 @@ def build_parser():
     parser.add_argument("--credentials-file", type=str, default=env("QUAKE_CREDENTIALS_FILE", DEFAULT_CREDENTIALS_FILE), help="Where the anonymous device identity is stored (default: ~/.quake_device_credentials.json)")
     parser.add_argument("--locale", type=str, default=env("QUAKE_LOCALE", "en_US"), help="Locale for device registration")
     parser.add_argument("--timezone", type=str, default=env("QUAKE_TIMEZONE", "UTC"), help="Timezone for device registration")
-    parser.add_argument("--no-emsc", action="store_true", default=env("QUAKE_NO_EMSC", "") not in ("", "0", "false"), help="Disable the EMSC SeismicPortal real-time feed (secondary, non-AEAS source)")
-    parser.add_argument("--emsc-min-mag", type=_float_range(0.0, 10.0, "magnitude"), default=env("QUAKE_EMSC_MIN_MAG", "4.0"), help="Minimum magnitude for EMSC events to trigger the webhook (default: 4.0)")
-    parser.add_argument("--emsc-radius-km", type=_float_range(1.0, 20040.0, "radius"), default=env("QUAKE_EMSC_RADIUS_KM", "300"), help="Only EMSC events within this distance of the base station trigger the webhook (default: 300)")
+    parser.add_argument("--sources", type=_sources, default=env("QUAKE_SOURCES", "mcs,emsc,wolfx"), help="Push sources to follow: mcs (Google AEAS, experimental), emsc (worldwide rapid reports), wolfx (official early warnings for Japan and China). Default: mcs,emsc,wolfx")
+    parser.add_argument("--no-emsc", action="store_true", default=env("QUAKE_NO_EMSC", "") not in ("", "0", "false"), help="Shortcut to drop emsc from --sources")
+    parser.add_argument("--notice-mmi", type=_float_range(1.0, 12.0, "intensity"), default=env("QUAKE_NOTICE_MMI", "3.0"), help="Notify (level 'notice') when the estimated intensity at your base station reaches this MMI (default: 3.0, like Android's 'Be Aware')")
+    parser.add_argument("--alert-mmi", type=_float_range(1.0, 12.0, "intensity"), default=env("QUAKE_ALERT_MMI", "5.0"), help="Raise level 'alert' from this estimated MMI (default: 5.0, like Android's 'Take Action')")
+    parser.add_argument("--min-magnitude", "--emsc-min-mag", dest="min_magnitude", type=_float_range(0.0, 10.0, "magnitude"), default=env("QUAKE_MIN_MAGNITUDE", env("QUAKE_EMSC_MIN_MAG", "0")), help="Ignore events below this magnitude, whatever their estimated intensity (default: 0)")
+    parser.add_argument("--max-distance-km", "--emsc-radius-km", dest="max_distance_km", type=_float_range(1.0, 20040.0, "distance"), default=env("QUAKE_MAX_DISTANCE_KM", env("QUAKE_EMSC_RADIUS_KM", "20040")), help="Ignore events farther than this from the base station (default: no limit)")
+    parser.add_argument("--shake-udp", type=_udp_endpoint, default=env("QUAKE_SHAKE_UDP", ""), help="Listen for a Raspberry Shake UDP datacast on [host:]port (e.g. 8888) and run an on-site P-wave trigger")
+    parser.add_argument("--shake-channel", type=str, default=env("QUAKE_SHAKE_CHANNEL", ""), help="Shake channel to watch (default: first vertical channel, e.g. EHZ or ENZ)")
+    parser.add_argument("--shake-sta-lta-on", type=_float_range(1.5, 100.0, "STA/LTA ratio"), default=env("QUAKE_SHAKE_STA_LTA_ON", "4.0"), help="STA/LTA ratio that starts an on-site trigger (default: 4.0)")
+    parser.add_argument("--shake-sta-lta-off", type=_float_range(0.5, 50.0, "STA/LTA ratio"), default=env("QUAKE_SHAKE_STA_LTA_OFF", "1.5"), help="STA/LTA ratio that ends it (default: 1.5)")
+    parser.add_argument("--shake-alert-counts", type=_float_range(0.0, 1e12, "counts"), default=env("QUAKE_SHAKE_ALERT_COUNTS", "0"), help="Peak amplitude (raw counts) that turns an on-site trigger into level 'alert' (default: 0 = always 'notice')")
     parser.add_argument("--debug-frames", action="store_true", default=env("QUAKE_DEBUG_FRAMES", "") not in ("", "0", "false"), help="Log a one-line summary of every non-heartbeat MCS frame (for protocol research)")
     parser.add_argument("--test-ping", action="store_true", help="Perform a single diagnostic TLS ping and exit")
     parser.add_argument("--simulate", action="store_true", help="Test internal Protobuf event decoding")
@@ -1882,6 +2441,10 @@ def main():
     global CREDENTIALS_FILE, ALLOWED_ORIGINS, ALLOWED_HOSTS, DEBUG_FRAMES
     args = build_parser().parse_args()
     DEBUG_FRAMES = args.debug_frames
+    if args.no_emsc:
+        args.sources.discard("emsc")
+    if args.alert_mmi < args.notice_mmi:
+        build_parser().error("--alert-mmi must be >= --notice-mmi")
     CREDENTIALS_FILE = os.path.abspath(os.path.expanduser(args.credentials_file))
     ALLOWED_ORIGINS = args.allowed_origins
     ALLOWED_HOSTS = args.allowed_hosts
