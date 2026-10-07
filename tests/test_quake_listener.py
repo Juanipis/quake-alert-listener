@@ -292,6 +292,191 @@ class Shake(unittest.TestCase):
         self.assertEqual(sent[0]["level"], "notice")
 
 
+class FakeSock:
+    """Plays the MCS server side: queued inbound bytes, captured outbound frames."""
+    def __init__(self, inbound=b""):
+        self.inbound = bytearray(inbound)
+        self.sent = bytearray()
+
+    def recv(self, n):
+        if not self.inbound:
+            raise ql.socket.timeout()
+        chunk, self.inbound[:] = bytes(self.inbound[:n]), self.inbound[n:]
+        return chunk
+
+    def sendall(self, data):
+        self.sent.extend(data)
+
+    def settimeout(self, t):
+        pass
+
+    def close(self):
+        pass
+
+    def login_request(self):
+        """Fields of the LoginRequest at the start of `sent` (after the version byte)."""
+        buf = bytes(self.sent)
+        assert buf[0] == ql.MCS_VERSION and buf[1] == ql.TAG_LOGIN_REQUEST
+        n, start = ql.decode_varint(buf, 2)
+        return ql.parse_protobuf(buf[start:start + n])
+
+    def frames(self, skip_version=False):
+        buf, out = bytes(self.sent), []
+        if skip_version:
+            buf = buf[1:]
+        while buf:
+            tag = buf[0]
+            n, start = ql.decode_varint(buf, 1)
+            out.append((tag, ql.parse_protobuf(buf[start:start + n])))
+            buf = buf[start + n:]
+        return out
+
+
+def mcs_frame(tag, payload):
+    return bytes([tag]) + ql.encode_varint(len(payload)) + payload
+
+
+class GoogleMCS(unittest.TestCase):
+    """Protocol behaviour checked against Chromium's google_apis/gcm (mcs.proto, mcs_client.cc)."""
+
+    def client(self, inbound, ping=120):
+        c = ql.QuakeMCSClient({"android_id": 4242, "security_token": 99}, ping_interval=ping)
+        sock = FakeSock(inbound)
+        c._open = lambda port: sock
+        return c, sock
+
+    def login_response(self, error_code=None, hb_ms=None, server_ms=None):
+        body = ql.field_str(1, "0")
+        if error_code is not None:
+            body += ql.field_bytes(3, ql.field_varint(1, error_code) + ql.field_str(2, "bad"))
+        if hb_ms:
+            body += ql.field_bytes(7, ql.field_varint(3, hb_ms))
+        if server_ms:
+            body += ql.field_varint(8, server_ms)
+        return bytes([ql.MCS_VERSION]) + mcs_frame(ql.TAG_LOGIN_RESPONSE, body)
+
+    def test_checkin_request_layout(self):
+        first = ql.parse_protobuf(ql.build_checkin_request())
+        checkin = ql.parse_protobuf(first[4][0][1])
+        self.assertEqual(checkin[12][0][1], ql.DEVICE_CHROME_BROWSER)      # type, field 12
+        build = ql.parse_protobuf(checkin[13][0][1])                       # chrome_build, field 13
+        self.assertEqual(build[2][0][1], ql.CHROME_VERSION.encode())
+        self.assertEqual((first[14][0][1], first[22][0][1]), (3, 0))       # version, user_serial_number
+        self.assertNotIn(6, first)                                         # no locale
+        self.assertNotIn(12, first)                                        # no time zone
+        again = ql.parse_protobuf(ql.build_checkin_request(
+            {"android_id": 4242, "security_token": 2 ** 63 + 5, "digest": "1-abc"}))
+        self.assertEqual(again[2][0], (0, 4242))
+        self.assertEqual(again[13][0], (1, 2 ** 63 + 5))                   # fixed64 security_token
+        self.assertEqual(again[3][0][1], b"1-abc")
+
+    def test_checkin_due(self):
+        now = 1_000_000_000
+        self.assertTrue(ql.checkin_due({"android_id": 1, "security_token": 1}, now))       # legacy file
+        fresh = {"checkin_format": ql.CHECKIN_FORMAT, "last_checkin": now - 3600, "checkin_interval_s": 172800}
+        self.assertFalse(ql.checkin_due(fresh, now))
+        self.assertTrue(ql.checkin_due(dict(fresh, last_checkin=now - 172801), now))
+
+    def test_login_reads_heartbeat_config_and_clock(self):
+        server_ms = int((time.time() + 30) * 1000)       # server 30 s ahead
+        c, sock = self.client(self.login_response(hb_ms=60000, server_ms=server_ms))
+        c.connect()
+        self.assertTrue(c.connected)
+        self.assertEqual((c.stream_id_in, c.stream_id_out), (1, 1))
+        self.assertEqual((c.server_heartbeat_s, c.ping_interval), (60, 60))   # follows the faster server
+        self.assertAlmostEqual(ql._CLOCK["offset_s"], 30, delta=1)
+        self.assertAlmostEqual(ql.now_corrected() - time.time(), 30, delta=1)
+        login = sock.login_request()
+        settings = {ql.parse_protobuf(v)[1][0][1]: ql.parse_protobuf(v)[2][0][1] for _, v in login[8]}
+        self.assertEqual(settings, {b"new_vc": b"1", b"hbping": b"120000"})   # like Chrome
+        self.assertEqual((login[14][0][1], login[16][0][1], login[17][0][1]), (1, 2, 1))
+        ql._CLOCK["offset_s"] = None
+
+    def test_login_rejected(self):
+        c, _ = self.client(self.login_response(error_code=401))
+        with self.assertRaises(ql.MCSLoginRejected):
+            c.connect()
+
+    def test_heartbeats_carry_last_stream_id(self):
+        ping = mcs_frame(ql.TAG_HEARTBEAT_PING, b"")
+        c, sock = self.client(self.login_response() + ping)
+        c.connect()
+        sock.sent.clear()
+        tag, _ = c.read_packet()
+        self.assertEqual(tag, ql.TAG_HEARTBEAT_PING)
+        c.send_pong()
+        c.send_ping()
+        frames = sock.frames()
+        self.assertEqual([f[0] for f in frames], [ql.TAG_HEARTBEAT_ACK, ql.TAG_HEARTBEAT_PING])
+        self.assertEqual(frames[0][1][2][0][1], 2)          # login response + ping received
+        self.assertIsNotNone(c.awaiting_ack_since)
+        sock.inbound.extend(mcs_frame(ql.TAG_HEARTBEAT_ACK, b""))
+        c.read_packet()
+        self.assertIsNone(c.awaiting_ack_since)              # any packet clears the ack wait
+
+    def test_stream_ack_after_ten_messages_and_immediate_ack(self):
+        def data(i, immediate=False):
+            body = ql.field_str(3, "sender") + ql.field_str(5, "test.app") + ql.field_str(9, f"pid-{i}")
+            if immediate:
+                body += ql.field_varint(24, 1)
+            return mcs_frame(ql.TAG_DATA_MESSAGE_STANZA, body)
+        c, sock = self.client(self.login_response() + b"".join(data(i) for i in range(10)) + data(10, True))
+        c.connect()
+        sock.sent.clear()
+        for _ in range(11):
+            c.read_packet()
+        acks = [f for f in sock.frames() if f[0] == ql.TAG_IQ_STANZA]
+        self.assertEqual(len(acks), 2)                       # after 10, then immediate_ack
+        ext = ql.parse_protobuf(acks[0][1][7][0][1])
+        self.assertEqual(ext[1][0][1], ql.IQ_STREAM_ACK)
+        self.assertEqual(acks[0][1][10][0][1], 11)          # last_stream_id_received
+        self.assertEqual(c.unacked_persistent_ids[:2], ["pid-0", "pid-1"])   # acked, awaiting confirmation
+        # the server confirms with last_stream_id_received >= our ack's stream id
+        sock.inbound.extend(mcs_frame(ql.TAG_HEARTBEAT_ACK, ql.field_varint(2, c.stream_id_out)))
+        c.read_packet()
+        self.assertEqual(c.unacked_persistent_ids, [])
+
+    def test_unconfirmed_ids_go_into_next_login(self):
+        msg = mcs_frame(ql.TAG_DATA_MESSAGE_STANZA, ql.field_str(3, "s") + ql.field_str(5, "a") + ql.field_str(9, "pid-x"))
+        c, sock = self.client(self.login_response() + msg)
+        c.connect()
+        c.read_packet()
+        self.assertEqual(c.unacked_persistent_ids, ["pid-x"])
+        sock.inbound.extend(self.login_response())
+        sock.sent.clear()
+        c.connect()
+        self.assertIn((2, b"pid-x"), sock.login_request().get(10, []))   # received_persistent_id
+        self.assertEqual(c.unacked_persistent_ids, [])       # confirmed by the new LoginResponse
+
+    def test_idle_notification_is_answered(self):
+        app = ql.field_str(1, "IdleNotification") + ql.field_str(2, "")
+        idle = mcs_frame(ql.TAG_DATA_MESSAGE_STANZA,
+                         ql.field_str(3, "gcm@android.com") + ql.field_str(5, ql.MCS_CATEGORY) + ql.field_bytes(7, app))
+        c, sock = self.client(self.login_response() + idle)
+        c.connect()
+        sock.sent.clear()
+        c.read_packet()
+        (tag, reply), = sock.frames()
+        self.assertEqual(tag, ql.TAG_DATA_MESSAGE_STANZA)
+        self.assertEqual(reply[5][0][1].decode(), ql.MCS_CATEGORY)
+        kv = ql.parse_protobuf(reply[7][0][1])
+        self.assertEqual((kv[1][0][1], kv[2][0][1]), (b"IdleNotification", b"false"))
+
+    def test_fallback_port(self):
+        c = ql.QuakeMCSClient({"android_id": 1, "security_token": 2})
+        sock = FakeSock(self.login_response())
+        tried = []
+
+        def open_port(port):
+            tried.append(port)
+            if port == 5228:
+                raise OSError("blocked")
+            return sock
+        c._open = open_port
+        c.connect()
+        self.assertEqual((tried, c.port), ([5228, 443], 443))
+
+
 class HttpApi(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

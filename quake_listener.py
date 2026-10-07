@@ -41,7 +41,7 @@ if sys.version_info < (3, 8):  # pragma: no cover - guard for very old interpret
     sys.stderr.write("quake_listener.py requires Python 3.8 or newer.\n")
     sys.exit(1)
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 HOST_MCS = "mtalk.google.com"
 PORT_MCS = 5228
@@ -192,6 +192,10 @@ def field_str(tag, s):
     return field_bytes(tag, s.encode("utf-8"))
 
 
+def field_fixed64(tag, val):
+    return encode_varint((tag << 3) | 1) + struct.pack("<Q", int(val) & 0xFFFFFFFFFFFFFFFF)
+
+
 def field_double(tag, val):
     return encode_varint((tag << 3) | 1) + struct.pack("<d", val)
 
@@ -325,50 +329,182 @@ def save_credentials(creds, path=None):
         pass
 
 
-def register_device(locale="en_US", tz="UTC"):
-    log(f"Registering anonymous hardware identity (locale={locale}, tz={tz})...")
-    chrome_build = field_varint(1, 2) + field_str(2, "120.0.6099.144") + field_varint(3, 1)
-    checkin_proto = field_varint(1, 3) + field_bytes(2, chrome_build)
-    body = (
-        field_bytes(4, checkin_proto) +
-        field_str(6, locale) +
-        field_str(12, tz) +
-        field_varint(14, 3)
-    )
+CHECKIN_URL = "https://android.clients.google.com/checkin"
+CHROME_VERSION = "120.0.6099.144"
+CHECKIN_INTERVAL_S = 2 * 24 * 3600       # Chromium GServicesSettings default
+CHECKIN_MIN_INTERVAL_S = 12 * 3600       # Chromium minimum
+CHECKIN_FORMAT = 2                        # bump when the checkin request layout changes
+DEVICE_CHROME_BROWSER = 3                 # checkin_proto.DeviceType
+CHANNEL_STABLE = 1
 
-    req = urllib.request.Request(
-        "https://android.clients.google.com/checkin",
-        data=body,
-        headers={"Content-Type": "application/x-protobuf"},
-        method="POST"
-    )
 
+def _chrome_platform():
+    """checkin_proto.ChromeBuildProto.Platform for this OS."""
+    if sys.platform == "darwin":
+        return 2   # PLATFORM_MAC
+    if sys.platform.startswith("win"):
+        return 1   # PLATFORM_WIN
+    return 3       # PLATFORM_LINUX
+
+
+def build_checkin_request(creds=None):
+    """AndroidCheckinRequest laid out exactly like Chrome's GCM client (checkin_request.cc).
+
+    A first checkin sends id 0 / token 0; later checkins send the stored identity so
+    Google keeps it alive. Unlike earlier versions, no locale or timezone is sent:
+    Chrome doesn't send them either.
+    """
+    android_id = int(creds["android_id"]) if creds else 0
+    token = int(creds["security_token"]) if creds else 0
+    chrome_build = (field_varint(1, _chrome_platform()) +       # platform
+                    field_str(2, CHROME_VERSION) +               # chrome_version
+                    field_varint(3, CHANNEL_STABLE))             # channel
+    checkin = field_varint(12, DEVICE_CHROME_BROWSER) + field_bytes(13, chrome_build)  # type, chrome_build
+    body = field_varint(2, android_id)                           # id
+    if creds and creds.get("digest"):
+        body += field_str(3, creds["digest"])                    # digest of gservices settings
+    body += (field_bytes(4, checkin) +                           # checkin
+             field_fixed64(13, token) +                          # security_token
+             field_varint(14, 3) +                               # version
+             field_varint(22, 0))                                # user_serial_number
+    return body
+
+
+def parse_checkin_response(data):
+    """AndroidCheckinResponse -> dict (android_id, security_token, time_ms, digest, settings)."""
+    r = parse_protobuf(data)
+    settings = {}
+    for wire, raw in r.get(5, []):                               # repeated GservicesSetting
+        if wire == 2:
+            s = parse_protobuf(raw)
+            name = _pb_text(s, 1, default="", encoding="latin1")
+            if name:
+                settings[name] = _pb_text(s, 2, default="", encoding="latin1")
+    time_wire, time_ms = _pb_first(r, 3)
+    return {
+        "android_id": _pb_first(r, 7)[1],
+        "security_token": _pb_first(r, 8)[1],
+        "time_ms": time_ms if time_wire == 0 else None,
+        "digest": _pb_text(r, 4, encoding="latin1"),
+        "settings": settings,
+    }
+
+
+# Clock check: Google's checkin and MCS login both report server time. A wrong local
+# clock would make every S-wave countdown wrong, so the offset is measured, shown in
+# /status and used to correct "now" when it is significant.
+CLOCK_WARN_S = 2.0
+_CLOCK = {"offset_s": None}
+
+
+def note_clock_sample(source, server_epoch, t_send, t_recv):
+    """Record server time vs. the midpoint of the local request window."""
+    if not server_epoch or server_epoch < 946684800:  # before 2000: not a timestamp
+        return None
+    offset = round(server_epoch - (t_send + t_recv) / 2.0, 3)
+    rtt = round(t_recv - t_send, 3)
+    prev = _CLOCK["offset_s"]
+    _CLOCK["offset_s"] = offset
+    with STATE_LOCK:
+        STATE["clock"] = {"offset_s": offset, "source": source, "rtt_s": rtt,
+                          "measured_at": round(t_recv, 1),
+                          "corrected": abs(offset) >= CLOCK_WARN_S}
+    if abs(offset) >= CLOCK_WARN_S and (prev is None or abs(prev - offset) >= 1.0):
+        log(f"Local clock is {abs(offset):.1f} s {'behind' if offset > 0 else 'ahead of'} Google's "
+            f"({source}); S-wave countdowns are corrected for it. Consider enabling NTP.")
+    return offset
+
+
+def now_corrected():
+    """time.time() corrected by the measured server clock offset when it matters."""
+    off = _CLOCK["offset_s"]
+    if off is not None and CLOCK_WARN_S <= abs(off) <= 3600:
+        return time.time() + off
+    return time.time()
+
+
+def checkin(creds=None):
+    """Run a GCM checkin (new identity if creds is None). Returns the updated creds dict."""
+    body = build_checkin_request(creds)
+    req = urllib.request.Request(CHECKIN_URL, data=body,
+                                 headers={"Content-Type": "application/x-protobuf"}, method="POST")
+    t0 = time.time()
     with urllib.request.urlopen(req, timeout=12) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"Checkin registration failed with HTTP code {resp.status}")
+            raise RuntimeError(f"Checkin failed with HTTP {resp.status}")
         data = resp.read()
+    t1 = time.time()
+    r = parse_checkin_response(data)
+    aid, tok = r["android_id"], r["security_token"]
+    if not (isinstance(aid, int) and isinstance(tok, int) and aid and tok):
+        raise RuntimeError("Checkin response did not contain a device identity")
+    if r["time_ms"]:
+        note_clock_sample("checkin", r["time_ms"] / 1000.0, t0, t1)
+    try:
+        interval = int(r["settings"].get("checkin_interval", CHECKIN_INTERVAL_S))
+    except ValueError:
+        interval = CHECKIN_INTERVAL_S
+    interval = max(CHECKIN_MIN_INTERVAL_S, min(interval, 7 * 24 * 3600))
+    now = time.time()
+    new = dict(creds or {})
+    new.update({
+        "android_id": aid,
+        "security_token": tok,
+        "created_at": (creds or {}).get("created_at", now),
+        "last_checkin": now,
+        "checkin_interval_s": interval,
+        "digest": r["digest"] or (creds or {}).get("digest"),
+        "device_type": "chrome_browser",
+        "checkin_format": CHECKIN_FORMAT,
+    })
+    for legacy in ("locale", "time_zone"):
+        new.pop(legacy, None)
+    if creds and int(creds["android_id"]) != aid:
+        log("Google assigned a new device identity during checkin.")
+    _update_mcs_state(last_checkin_ts=round(now, 1), checkin_interval_s=interval,
+                      device_type="chrome_browser")
+    return new
 
-    parsed = parse_protobuf(data)
-    android_id = _pb_first(parsed, 7)[1]
-    security_token = _pb_first(parsed, 8)[1]
 
-    if not (isinstance(android_id, int) and isinstance(security_token, int) and android_id and security_token):
-        raise RuntimeError("Registration response did not return valid hardware credentials.")
-
-    creds = {
-        "android_id": android_id,
-        "security_token": security_token,
-        "created_at": time.time(),
-        "locale": locale,
-        "time_zone": tz
-    }
+def _save_creds_logged(creds, what):
     try:
         save_credentials(creds)
-        log(f"Device registered successfully (id: {android_id}); credentials saved to {CREDENTIALS_FILE}")
+        log(f"{what} (id: {creds['android_id']}); saved to {CREDENTIALS_FILE}")
     except OSError as e:
-        log(f"Device registered (id: {android_id}) but credentials could not be saved to "
-            f"{CREDENTIALS_FILE}: {e}. A new identity will be registered on next start.")
+        log(f"{what} (id: {creds['android_id']}) but could not save {CREDENTIALS_FILE}: {e}.")
+
+
+def register_device(locale="en_US", tz="UTC"):
+    """Register a fresh anonymous identity (locale/tz are no longer sent, kept for API compat)."""
+    log("Registering anonymous device identity (Chrome GCM checkin)...")
+    creds = checkin(None)
+    _save_creds_logged(creds, "Device registered successfully")
     return creds
+
+
+def checkin_due(creds, now=None):
+    """True when the identity needs a (re-)checkin: legacy layout or interval elapsed."""
+    now = time.time() if now is None else now
+    if creds.get("checkin_format") != CHECKIN_FORMAT:
+        return True
+    last = creds.get("last_checkin") or creds.get("created_at") or 0
+    return now - float(last) >= float(creds.get("checkin_interval_s") or CHECKIN_INTERVAL_S)
+
+
+def refresh_checkin(creds):
+    """Periodic checkin with the stored identity (as Chrome does every ~2 days).
+
+    Returns updated creds, or the old ones if the checkin failed (it is retried later).
+    """
+    legacy = creds.get("checkin_format") != CHECKIN_FORMAT
+    try:
+        new = checkin(creds)
+    except Exception as e:
+        log(f"Periodic checkin failed ({e}); keeping the current identity and retrying later.")
+        creds["last_checkin"] = time.time() - float(creds.get("checkin_interval_s") or CHECKIN_INTERVAL_S) + 3600
+        return creds
+    _save_creds_logged(new, "Identity re-checked in as a Chrome GCM client" if legacy else "Periodic checkin done")
+    return new
 
 
 def _valid_credentials(creds):
@@ -512,12 +648,34 @@ def _new_event_id(prefix):
 # TLS Socket Client for Google MCS (mtalk:5228)
 # ==============================================================================
 
+class MCSLoginRejected(ConnectionError):
+    """The server answered the LoginRequest with an error (bad or expired identity)."""
+
+
+# Behaviour below follows Chromium's open-source GCM client (google_apis/gcm/engine/
+# mcs_client.cc, heartbeat_manager.cc, mcs.proto): stream-id acknowledgements,
+# StreamAck every 10 unacked messages or on immediate_ack, IdleNotification replies,
+# server heartbeat config, a 60 s heartbeat-ack timeout and the 443 fallback port.
+MCS_PORTS = (5228, 443)                   # main, fallback (networks that block 5228)
+MCS_CATEGORY = "com.google.android.gsf.gtalkservice"
+MCS_FROM = "gcm@android.com"
+IQ_SELECTIVE_ACK = 12
+IQ_STREAM_ACK = 13
+UNACKED_BEFORE_STREAM_ACK = 10
+HEARTBEAT_ACK_TIMEOUT_S = 60
+MAX_HEARTBEAT_S = 28 * 60                 # Chromium cellular default; never wait longer
+
+
 class QuakeMCSClient:
     def __init__(self, creds, ping_interval=120):
         self.android_id = int(creds["android_id"])
         self.security_token = int(creds["security_token"])
         self.ping_interval = max(30, min(int(ping_interval), 600))
+        self.user_ping_interval = self.ping_interval
+        self.server_heartbeat_s = None
         self.sock = None
+        self.port = None
+        self._preferred_port = MCS_PORTS[0]
         self.connected = False
         self.last_ping = time.time()
         self.pings_sent = 0
@@ -528,10 +686,14 @@ class QuakeMCSClient:
         self.handshake_latency_ms = None  # TCP + TLS + login time of the last connect
         self._buf = bytearray()
         self._last_rx_mono = time.monotonic()
-        # Persistent IDs of data messages received since the last login; sent back in the
-        # next LoginRequest (received_persistent_id) so the server stops re-delivering them.
-        self.unacked_persistent_ids = []
+        # Stream bookkeeping (mcs.proto: "each side keeps a counter").
+        self.stream_id_in = 0     # packets received this session (LoginResponse = 1)
+        self.stream_id_out = 0    # packets sent this session (LoginRequest = 1)
+        self.stream_acks_sent = 0
+        self._unacked_ids = []                            # received, not yet acked to server
+        self._acked_ids = collections.OrderedDict()       # stream_id_out -> ids awaiting confirmation
         self._seen_persistent_ids = collections.OrderedDict()
+        self.awaiting_ack_since = None
         # Heartbeat bookkeeping (shared with the HTTP thread through _cond).
         self._cond = threading.Condition()
         self._session = 0
@@ -541,21 +703,32 @@ class QuakeMCSClient:
         self._manual_ping_requested = False
         self._manual_ping_seq = None
 
+    # Kept for older callers/tests: everything still awaiting server confirmation.
+    @property
+    def unacked_persistent_ids(self):
+        ids = list(self._unacked_ids)
+        for lst in self._acked_ids.values():
+            ids.extend(lst)
+        return ids
+
     # ------------------------------------------------------------------ framing
     def _login_packet(self):
-        setting = field_str(1, "new_vc") + field_str(2, "1")
+        new_vc = field_str(1, "new_vc") + field_str(2, "1")
+        hbping = field_str(1, "hbping") + field_str(2, str(self.user_ping_interval * 1000))
         login_req = (
-            field_str(1, "chrome-120.0.6099.144") +
+            field_str(1, f"chrome-{CHROME_VERSION}") +
             field_str(2, "mcs.android.com") +
             field_str(3, str(self.android_id)) +
             field_str(4, str(self.android_id)) +
             field_str(5, str(self.security_token)) +
             field_str(6, f"android-{self.android_id:x}") +
-            field_bytes(8, setting) +
-            b"".join(field_str(10, pid) for pid in self.unacked_persistent_ids) +
-            field_varint(14, 1) +
-            field_varint(16, 2) +
-            field_varint(17, 1)
+            field_bytes(8, new_vc) +
+            field_bytes(8, hbping) +                      # our heartbeat interval, like Chrome
+            b"".join(field_str(10, pid) for pid in self.unacked_persistent_ids[-200:]) +
+            field_varint(12, 0) +                         # adaptive_heartbeat = false
+            field_varint(14, 1) +                         # use_rmq2
+            field_varint(16, 2) +                         # auth_service = ANDROID_ID
+            field_varint(17, 1)                           # network_type
         )
         return bytes([MCS_VERSION, TAG_LOGIN_REQUEST]) + encode_varint(len(login_req)) + login_req
 
@@ -593,10 +766,12 @@ class QuakeMCSClient:
         """Return the next (tag, payload), or None if nothing complete arrived within READ_TIMEOUT_S.
 
         Partial frames stay buffered across calls, so TLS records split anywhere are handled.
+        Stream bookkeeping (acks) runs for every frame returned.
         """
         while True:
             frame = self._parse_frame()
             if frame is not None:
+                self.on_frame(*frame)
                 return frame
             if not self._fill():
                 return None
@@ -610,23 +785,57 @@ class QuakeMCSClient:
         del self._buf[:n]
         return data
 
+    def _send(self, tag, payload):
+        """Send one MCS packet (socket-owner thread only), acking what we've received."""
+        self.sock.sendall(bytes([tag]) + encode_varint(len(payload)) + payload)
+        self.stream_id_out += 1
+        if self._unacked_ids:
+            # This packet carries last_stream_id_received: these ids are now acked,
+            # pending the server's confirmation (its next last_stream_id_received).
+            self._acked_ids[self.stream_id_out] = self._unacked_ids
+            self._unacked_ids = []
+
     # ------------------------------------------------------------- connection
-    def connect(self):
-        self.close()
-        t0 = time.monotonic()
-        raw_sock = socket.create_connection((HOST_MCS, PORT_MCS), timeout=CONNECT_TIMEOUT_S)
+    def _open(self, port):
+        raw_sock = socket.create_connection((HOST_MCS, port), timeout=CONNECT_TIMEOUT_S)
         try:
             raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
             ctx = ssl.create_default_context()
-            self.sock = ctx.wrap_socket(raw_sock, server_hostname=HOST_MCS)
+            return ctx.wrap_socket(raw_sock, server_hostname=HOST_MCS)
         except BaseException:
             raw_sock.close()
             raise
+
+    def connect(self):
+        self.close()
+        t0 = time.monotonic()
+        ports = [self._preferred_port] + [p for p in MCS_PORTS if p != self._preferred_port]
+        last_err = None
+        for port in ports:
+            try:
+                self.sock = self._open(port)
+                self.port = port
+                break
+            except OSError as e:
+                last_err = e
+                log(f"Could not reach {HOST_MCS}:{port} ({e})"
+                    + ("; trying the fallback port." if port != ports[-1] else "."))
+        if self.sock is None:
+            raise last_err or ConnectionError("No MCS endpoint reachable")
+        if self.port != self._preferred_port:
+            self._preferred_port = self.port
         self._buf = bytearray()
         self.sock.settimeout(CONNECT_TIMEOUT_S)
 
-        sent_ids = list(self.unacked_persistent_ids)
+        # A new session: all ids not confirmed by the server go into the LoginRequest.
+        pending = self.unacked_persistent_ids
+        self._unacked_ids, self._acked_ids = pending, collections.OrderedDict()
+        self.stream_id_in, self.stream_id_out = 0, 0
+        t_send = time.time()
         self.sock.sendall(self._login_packet())
+        self.stream_id_out = 1                       # LoginRequest is stream id 1
+        self._acked_ids[1] = self._unacked_ids       # confirmed by the LoginResponse
+        self._unacked_ids = []
 
         v_byte = self._recv_exact(1)[0]
         if v_byte != MCS_VERSION:
@@ -636,6 +845,7 @@ class QuakeMCSClient:
             frame = self._parse_frame()
             if frame is None and not self._fill():
                 raise socket.timeout("Timed out waiting for MCS login response.")
+        t_recv = time.time()
         tag, payload = frame
         if tag != TAG_LOGIN_RESPONSE:
             raise ConnectionError(f"Handshake failed: version={v_byte}, tag={tag}")
@@ -644,11 +854,24 @@ class QuakeMCSClient:
         if err_raw is not None:
             err = parse_protobuf(err_raw)
             code = _pb_first(err, 1)[1]
-            msg = _pb_text(err, 2, default="")
-            raise ConnectionError(f"Login rejected by MCS (code {code}: {msg or 'no message'})")
+            if code:  # Chromium treats code 0 as no error
+                msg = _pb_text(err, 2, default="")
+                raise MCSLoginRejected(f"Login rejected by MCS (code {code}: {msg or 'no message'})")
 
-        # Server has now acknowledged the persistent IDs we reported.
-        self.unacked_persistent_ids = [p for p in self.unacked_persistent_ids if p not in sent_ids]
+        self.stream_id_in = 1                        # the LoginResponse
+        self._acked_ids.clear()                      # login accepted: received ids confirmed
+        cfg = _pb_bytes(resp, 7)                     # heartbeat_config
+        if cfg is not None:
+            wire, ms = _pb_first(parse_protobuf(cfg), 3)
+            if wire == 0 and ms:
+                self.server_heartbeat_s = round(ms / 1000.0)
+                # Follow the server if it wants more frequent pings; never ping less
+                # often than configured (fast dead-link detection matters here).
+                if 30 <= self.server_heartbeat_s < self.ping_interval:
+                    self.ping_interval = self.server_heartbeat_s
+        wire, server_ms = _pb_first(resp, 8)         # server_timestamp
+        if wire == 0 and server_ms:
+            note_clock_sample("mcs-login", server_ms / 1000.0, t_send, t_recv)
 
         self.handshake_latency_ms = round((time.monotonic() - t0) * 1000, 1)
         self.latency_ms = self.handshake_latency_ms
@@ -657,6 +880,7 @@ class QuakeMCSClient:
         self.last_ping = now
         self.last_packet_ts = now
         self._last_rx_mono = time.monotonic()
+        self.awaiting_ack_since = None
         self.pings_received += 1
         with self._cond:
             self._session += 1
@@ -665,7 +889,8 @@ class QuakeMCSClient:
             self._ping_sent_at.clear()
             self.connected = True
             self._cond.notify_all()
-        log(f"Authenticated with {HOST_MCS}:{PORT_MCS} (Handshake latency: {self.handshake_latency_ms} ms)")
+        port_note = "" if self.port == MCS_PORTS[0] else " via fallback port"
+        log(f"Authenticated with {HOST_MCS}:{self.port}{port_note} (Handshake latency: {self.handshake_latency_ms} ms)")
 
     def close(self):
         with self._cond:
@@ -682,11 +907,60 @@ class QuakeMCSClient:
     def seconds_since_rx(self):
         return time.monotonic() - self._last_rx_mono
 
+    def ack_overdue(self):
+        """True if a heartbeat went unanswered for HEARTBEAT_ACK_TIMEOUT_S (any packet counts)."""
+        return (self.awaiting_ack_since is not None and
+                time.monotonic() - self.awaiting_ack_since > HEARTBEAT_ACK_TIMEOUT_S)
+
+    # ------------------------------------------------------- incoming packets
+    def on_frame(self, tag, payload):
+        """Stream bookkeeping for every packet after login (Chromium HandlePacketFromWire)."""
+        fields = parse_protobuf(payload) if payload else {}
+        last_field = {TAG_HEARTBEAT_PING: 2, TAG_HEARTBEAT_ACK: 2, TAG_IQ_STANZA: 10,
+                      TAG_DATA_MESSAGE_STANZA: 11}.get(tag)
+        if last_field:
+            wire, last = _pb_first(fields, last_field)
+            if wire == 0 and last:
+                for sid in [s for s in self._acked_ids if s <= last]:
+                    del self._acked_ids[sid]     # server confirmed these acks
+        self.stream_id_in += 1
+        self.awaiting_ack_since = None           # "all messages act as heartbeat acks"
+        pid = _pb_text(fields, 9 if tag == TAG_DATA_MESSAGE_STANZA else 8, default="") \
+            if tag in (TAG_DATA_MESSAGE_STANZA, TAG_IQ_STANZA) else ""
+        if pid:
+            self._unacked_ids.append(pid)
+        immediate = tag == TAG_DATA_MESSAGE_STANZA and _pb_first(fields, 24)[1] == 1
+        if (self._unacked_ids and len(self._unacked_ids) % UNACKED_BEFORE_STREAM_ACK == 0) or immediate:
+            self.send_stream_ack()
+        if tag == TAG_DATA_MESSAGE_STANZA and _pb_text(fields, 5, default="") == MCS_CATEGORY:
+            self._handle_mcs_control(fields)
+        return fields
+
+    def _handle_mcs_control(self, fields):
+        """Server control messages: answer IdleNotification so we are not marked idle."""
+        for wire, raw in fields.get(7, []):
+            if wire == 2 and _pb_text(parse_protobuf(raw), 1, default="") == "IdleNotification":
+                app_data = field_str(1, "IdleNotification") + field_str(2, "false")
+                reply = (field_str(3, MCS_FROM) + field_str(5, MCS_CATEGORY) + field_bytes(7, app_data) +
+                         field_varint(11, self.stream_id_in) + field_varint(17, 0) +
+                         field_varint(18, int(time.time())))
+                self._send(TAG_DATA_MESSAGE_STANZA, reply)
+                return
+
+    def send_stream_ack(self):
+        """IqStanza{type SET, extension StreamAck}: acks everything received so far."""
+        ext = field_varint(1, IQ_STREAM_ACK) + field_bytes(2, b"")
+        iq = field_varint(2, 1) + field_str(3, "") + field_bytes(7, ext) + field_varint(10, self.stream_id_in)
+        self._send(TAG_IQ_STANZA, iq)
+        self.stream_acks_sent += 1
+
     # ------------------------------------------------------------- heartbeats
     def send_ping(self):
         """Send a HeartbeatPing. Must only be called from the thread that owns the socket."""
-        self.sock.sendall(bytes([TAG_HEARTBEAT_PING, 0]))
+        self._send(TAG_HEARTBEAT_PING, field_varint(2, self.stream_id_in))
         self.last_ping = time.time()
+        if self.awaiting_ack_since is None:
+            self.awaiting_ack_since = time.monotonic()
         with self._cond:
             self.pings_sent += 1
             self._session_pings += 1
@@ -694,7 +968,7 @@ class QuakeMCSClient:
             return self._session_pings
 
     def send_pong(self):
-        self.sock.sendall(bytes([TAG_HEARTBEAT_ACK, 0]))
+        self._send(TAG_HEARTBEAT_ACK, field_varint(2, self.stream_id_in))
 
     def on_heartbeat_ack(self):
         """Record a HeartbeatAck; returns the measured round-trip time in ms (or None)."""
@@ -748,7 +1022,10 @@ class QuakeMCSClient:
 
     # ----------------------------------------------------------- data messages
     def register_persistent_id(self, pid):
-        """Track a received persistent_id. Returns False if it is a duplicate delivery."""
+        """De-duplicate deliveries by persistent_id. Returns False for a re-delivery.
+
+        (Acknowledging the id to the server is handled by on_frame / _send.)
+        """
         if not pid:
             return True
         if pid in self._seen_persistent_ids:
@@ -756,8 +1033,6 @@ class QuakeMCSClient:
         self._seen_persistent_ids[pid] = True
         while len(self._seen_persistent_ids) > 512:
             self._seen_persistent_ids.popitem(last=False)
-        self.unacked_persistent_ids.append(pid)
-        del self.unacked_persistent_ids[:-100]
         return True
 
 
@@ -790,8 +1065,19 @@ STATE = {
         "connected_since": None,
         "reconnects": 0,
         "errors": 0,
-        "last_error": None
+        "last_error": None,
+        "endpoint": None,
+        "device_type": None,
+        "last_checkin_ts": None,
+        "checkin_interval_s": None,
+        "ping_interval_s": None,
+        "server_heartbeat_s": None,
+        "stream_id_in": 0,
+        "stream_id_out": 0,
+        "stream_acks_sent": 0,
+        "registrations": 0
     },
+    "clock": {"offset_s": None, "source": None, "rtt_s": None, "measured_at": None, "corrected": False},
     "sources": {},
     "last_quake": None,
     "ultimo_sismo": None,
@@ -834,6 +1120,12 @@ def _sync_client_counters(client):
         latency_ms=client.latency_ms,
         handshake_latency_ms=client.handshake_latency_ms,
         last_packet_ts=client.last_packet_ts,
+        endpoint=f"{HOST_MCS}:{client.port}" if client.port else None,
+        ping_interval_s=client.ping_interval,
+        server_heartbeat_s=client.server_heartbeat_s,
+        stream_id_in=client.stream_id_in,
+        stream_id_out=client.stream_id_out,
+        stream_acks_sent=client.stream_acks_sent,
     )
 
 
@@ -853,6 +1145,7 @@ def status_snapshot():
             "emsc": copy.deepcopy(STATE["emsc"]),
             "sources": copy.deepcopy(STATE["sources"]),
             "thresholds": copy.deepcopy(STATE.get("thresholds")),
+            "clock": copy.deepcopy(STATE.get("clock")),
             "last_quake": copy.deepcopy(STATE["last_quake"]),
             "ultimo_sismo": copy.deepcopy(STATE["ultimo_sismo"]),
             "total_detections": STATE["total_detections"],
@@ -1167,7 +1460,7 @@ def mmi_name(mmi):
 
 def assess_impact(ev, base_lat, base_lon, now=None):
     """Distance, estimated intensity and wave ETAs of event `ev` at the base station."""
-    now = time.time() if now is None else now
+    now = now_corrected() if now is None else now
     epi = haversine_distance(base_lat, base_lon, ev["lat"], ev["lon"])
     depth = ev.get("depth_km")
     depth = DEFAULT_DEPTH_KM if depth is None or depth < 0 else depth
@@ -1247,7 +1540,7 @@ class DetectionDesk:
     def submit(self, ev, now=None):
         """Evaluate one event. Returns the dispatched payload, or None."""
         a = self.args
-        now = time.time() if now is None else now
+        now = now_corrected() if now is None else now
         if ev.get("training"):
             log(f"{ev['source']}: training message for {ev.get('region') or 'unknown region'}, ignored")
             return None
@@ -2079,7 +2372,9 @@ def describe_frame(tag, payload):
             iq_type = _pb_first(f, 2)[1] if 2 in f else None
             ext = _pb_bytes(f, 7)
             ext_id = _pb_first(parse_protobuf(ext), 1)[1] if ext else None
-            parts.append(f"type={iq_type} extension={ext_id}")
+            ext_name = {12: "SelectiveAck", 13: "StreamAck"}.get(ext_id, ext_id)
+            iq_name = {0: "GET", 1: "SET", 2: "RESULT", 3: "ERROR"}.get(iq_type, iq_type)
+            parts.append(f"type={iq_name} extension={ext_name}")
         elif tag == TAG_CLOSE:
             parts.append("server close")
     except Exception as e:  # diagnostics must never break the session
@@ -2133,6 +2428,8 @@ def _run_session(client, dispatch_alert):
         if client.service_ping():
             _sync_client_counters(client)
 
+        if client.ack_overdue():
+            raise ConnectionError(f"No answer to heartbeat within {HEARTBEAT_ACK_TIMEOUT_S} s; reconnecting")
         idle = client.seconds_since_rx()
         if idle > stale_after:
             raise ConnectionError(f"No data from server for {int(idle)} s; connection presumed dead")
@@ -2205,6 +2502,8 @@ def run_listener(args):
         ShakeSource(args, desk).start()
 
     client = None
+    creds = None
+    rejections = 0
     backoff = BACKOFF_MIN_S
     try:
         if "mcs" not in args.sources:
@@ -2217,14 +2516,42 @@ def run_listener(args):
             try:
                 if client is None:
                     creds = get_credentials(args.locale, args.timezone)
+                    _update_mcs_state(last_checkin_ts=creds.get("last_checkin"),
+                                      checkin_interval_s=creds.get("checkin_interval_s"),
+                                      device_type=creds.get("device_type", "legacy"))
+                if checkin_due(creds):
+                    creds = refresh_checkin(creds)
+                if (client is None or client.android_id != int(creds["android_id"])
+                        or client.security_token != int(creds["security_token"])):
+                    old = client
                     client = QuakeMCSClient(creds, ping_interval=args.ping_interval)
+                    if old is not None:
+                        client._unacked_ids = old.unacked_persistent_ids
                     GLOBAL_CLIENT = client
                     _update_mcs_state(android_id=str(client.android_id))
                 client.connect()
+                rejections = 0
                 session_start = time.monotonic()
                 _set_connected(True)
                 _sync_client_counters(client)
                 reason = _run_session(client, dispatch_alert)
+            except MCSLoginRejected as e:
+                reason = str(e)
+                rejections += 1
+                with STATE_LOCK:
+                    STATE["google_mcs"]["errors"] += 1
+                    STATE["google_mcs"]["last_error"] = reason
+                if rejections == 1:
+                    log("Login rejected: re-checking in the current identity before retrying.")
+                    creds["last_checkin"] = 0
+                    creds["checkin_format"] = None
+                elif rejections >= 2:
+                    log("Login rejected again: registering a fresh anonymous identity.")
+                    try:
+                        creds = register_device()
+                        rejections = 0
+                    except Exception as reg_err:
+                        log(f"Registration failed: {reg_err}")
             except Exception as e:
                 reason = str(e) or e.__class__.__name__
                 with STATE_LOCK:
@@ -2306,6 +2633,8 @@ def test_ping(args=None):
     client = None
     try:
         creds = get_credentials(locale, tz)
+        if checkin_due(creds):
+            creds = refresh_checkin(creds)
         client = QuakeMCSClient(creds)
         client.connect()
         client.send_ping()
@@ -2318,8 +2647,10 @@ def test_ping(args=None):
         if rtt is None:
             log(f"Connected (handshake {client.handshake_latency_ms} ms) but no heartbeat ack within 5 s.")
             return 1
-        log(f"Test completed! Handshake latency: {client.handshake_latency_ms} ms, "
-            f"heartbeat round-trip: {rtt} ms. Connection verified.")
+        clock = _CLOCK["offset_s"]
+        log(f"Test completed! Endpoint {HOST_MCS}:{client.port}, handshake {client.handshake_latency_ms} ms, "
+            f"heartbeat round-trip {rtt} ms, server heartbeat {client.server_heartbeat_s or 'n/a'} s, "
+            f"clock offset {clock if clock is not None else 'n/a'} s. Connection verified.")
         return 0
     except KeyboardInterrupt:
         return 130
