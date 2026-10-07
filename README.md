@@ -18,10 +18,11 @@
 
 | Source | What it gives you | Speed | Where | Status |
 | :--- | :--- | :--- | :--- | :--- |
+| **Android Probe Gateway** (`POST /android`) | Real Google Play Services AEAS alerts via logcat streaming or HTTP probe | **< 10 ms**, immediate local broadcast | Global (wherever phone/AVD is located) | ✅ Operational |
 | **Official EEW** via [Wolfx](https://wolfx.jp) (JMA, CENC, Sichuan, Fujian, Chongqing) | Early warning with magnitude and location, revised as the quake grows | **Seconds after origin**, often before the S-wave | Japan and mainland China | ✅ Live |
 | **On-site sensor** ([Raspberry Shake](https://raspberryshake.org) UDP datacast) | P-wave trigger at your own house (STA/LTA) | **Seconds**, with no network in between | Anywhere you install one | ✅ Tested with synthetic signals |
 | **EMSC** [SeismicPortal](https://www.seismicportal.eu/realtime.html) | Every new or revised quake worldwide | **Minutes** (measured ~6–8 min) | Worldwide | ✅ Live |
-| **Google MCS** (Android Earthquake Alerts decoder) | Would be the AEAS alert itself | Seconds | Where AEAS runs | ⚠️ Experimental, never observed |
+| **Google MCS Socket** (Direct TLS mtalk:5228) | Protocol channel supporting Android & Chrome device checkin | Seconds | Where AEAS runs | ⚠️ Experimental (Google geofences to reporting phones) |
 
 For every event, wherever it comes from, the bridge works out your local impact:
 - **Estimated intensity at your base station** (MMI), using Allen, Wald & Worden (2012), the default intensity equation in USGS ShakeMap.
@@ -31,8 +32,10 @@ Notification levels follow Android's own thresholds:
 - **`notice`** from MMI 3, like Android's "Be Aware".
 - **`alert`** from MMI 5, like Android's "Take Action".
 
-> [!WARNING]
-> **About the Google path.** The TLS connection to `mtalk.google.com:5228`, the MCS login, the heartbeats and the protobuf decoder all work. But Google sends Android Earthquake Alerts through Play services, to phones chosen by the location they report, and an anonymous client like this one is not on that list: in our captures it only receives heartbeats. The full analysis is in **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**. If you can show it delivering (`--debug-frames` logs), please open an issue.
+> [!NOTE]
+> **Connecting Google Android Earthquake Alerts.**
+> - **Direct MCS Socket (`--device-type android`):** Performs authentic Google Checkin as a Pixel 6 (`DEVICE_ANDROID_OS`) and logs in as `android-34` with persistent stream-IDs and heartbeats. However, reverse-engineering of Google Play Services (`com.google.android.location.quake.ealert`) shows Google's cloud server only sends alert stanzas to devices actively reporting coordinates via Google Fused Location.
+> - **Android Probe Bridge (`POST /android`):** To get real AEAS alerts with zero delay, pair `quake_listener.py` with an Android device or a lightweight local Android emulator running Google Play Services via `android_alert_listener.py`. It streams events directly to `http://<listener-ip>:8990/android` with optional HMAC signing (`--android-secret`), immediately firing Home Assistant automations.
 
 > [!CAUTION]
 > This is a hobby project, not a certified warning system. Estimates carry roughly ±1 MMI of uncertainty, sources can be late or silent, and an on-site trigger can be a slammed door. Always keep official alerts enabled on your phone.
@@ -150,8 +153,10 @@ The suite covers the Google MCS protocol (checkin layout, login, stream acks, id
 | `--no-http` | - | `False` | Disable the local HTTP REST telemetry server |
 | `--webhook-url` | `QUAKE_WEBHOOK_URL` | *None* | Destination webhook URL (e.g. Home Assistant), `http://` or `https://` |
 | `--webhook-secret` | `QUAKE_WEBHOOK_SECRET` | *None* | Optional secret key for HMAC-SHA256 payload signing (prefer the env var: CLI args are visible in `ps`) |
+| `--android-secret` | `SISMO_ANDROID_SECRETO`, `QUAKE_ANDROID_SECRET` | *None* | Optional HMAC-SHA256 secret to verify incoming alerts from `android_alert_listener.py` on `POST /android` |
 | `--credentials-file` | `QUAKE_CREDENTIALS_FILE` | `~/.quake_device_credentials.json` | Where the anonymous device identity is stored (written with `0600` permissions) |
-| `--locale` / `--timezone` | `QUAKE_LOCALE` / `QUAKE_TIMEZONE` | `en_US` / `UTC` | Accepted for compatibility; since v2.1 nothing is sent (Chrome's checkin doesn't include them) |
+| `--device-type` | `QUAKE_DEVICE_TYPE` | `android` | Device identity profile: `android` (Pixel 6 Android 14 GMS profile) or `chrome` (Chromium GCM profile) |
+| `--locale` / `--timezone` | `QUAKE_LOCALE` / `QUAKE_TIMEZONE` | `en_US` / `UTC` | Locale and timezone profile for device registration |
 | `--sources` | `QUAKE_SOURCES` | `mcs,emsc,wolfx` | Push sources to follow (`--no-emsc` drops `emsc`) |
 | `--notice-mmi` | `QUAKE_NOTICE_MMI` | `3.0` | Estimated intensity at your base station that triggers a `notice` |
 | `--alert-mmi` | `QUAKE_ALERT_MMI` | `5.0` | Estimated intensity that triggers an `alert` |

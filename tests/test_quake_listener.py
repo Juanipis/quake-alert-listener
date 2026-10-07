@@ -5,6 +5,8 @@ All data here is synthetic: generic "Test Region" places around 0.5, 0.5.
 """
 import contextlib
 import importlib.util
+import hashlib
+import hmac
 import io
 import json
 import math
@@ -370,6 +372,16 @@ class GoogleMCS(unittest.TestCase):
         self.assertEqual(again[13][0], (1, 2 ** 63 + 5))                   # fixed64 security_token
         self.assertEqual(again[3][0][1], b"1-abc")
 
+    def test_android_checkin_request_layout(self):
+        req = ql.parse_protobuf(ql.build_checkin_request(device_type="android"))
+        checkin = ql.parse_protobuf(req[4][0][1])
+        self.assertEqual(checkin[12][0][1], ql.DEVICE_ANDROID_OS)         # type 1 (DEVICE_ANDROID_OS)
+        build = ql.parse_protobuf(checkin[1][0][1])                       # field 1: AndroidBuildProto
+        self.assertIn(b"oriole", build[2][0][1])                          # product: oriole
+        self.assertEqual(build[11][0][1], b"Pixel 6")                     # model: Pixel 6
+        self.assertIn(6, req)                                             # locale es_CO
+        self.assertIn(12, req)                                            # timezone America/Bogota
+
     def test_checkin_due(self):
         now = 1_000_000_000
         self.assertTrue(ql.checkin_due({"android_id": 1, "security_token": 1}, now))       # legacy file
@@ -497,17 +509,89 @@ class HttpApi(unittest.TestCase):
             with e:
                 return e.code, json.loads(e.read() or b"{}")
 
+    def post_json(self, path, data, headers=None):
+        body = json.dumps(data).encode("utf-8")
+        h = {"Content-Type": "application/json"}
+        if headers:
+            h.update(headers)
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=body, headers=h, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.loads(e.read() or b"{}")
+
     def test_status_shape(self):
         code, body = self.get("/status")
         self.assertEqual(code, 200)
         for k in ("google_mcs", "sources", "emsc", "recent_logs", "total_detections", "last_quake"):
             self.assertIn(k, body)
-        self.assertEqual(set(body["sources"]), {"emsc", "wolfx", "shake"})
+        self.assertEqual(set(body["sources"]), {"emsc", "wolfx", "shake", "android"})
 
     def test_guards(self):
         self.assertEqual(self.get("/status", {"Host": "attacker.example"})[0], 403)
         self.assertEqual(self.get("/drill", {"Origin": "https://attacker.example"}, "POST")[0], 403)
         self.assertEqual(self.get("/nope")[0], 404)
+
+    def test_post_android_alert(self):
+        args = ql.build_parser().parse_args(["--lat", "6.33", "--lon", "-75.55", "--name", "Bello"])
+        dispatched_list = []
+        desk = ql.DetectionDesk(args, lambda p: dispatched_list.append(p))
+        ql.GLOBAL_DESK = desk
+        ql.GLOBAL_ARGS = args
+        try:
+            payload = {
+                "fuente": "Google Android",
+                "nivel": "alerta",
+                "detectado": time.time(),
+                "texto": "Alerta sísmica Google (pantalla completa): M5.5 a 50 km",
+                "magnitud": 5.5,
+                "distancia_km": 50.0,
+                "lat": 6.35,
+                "lon": -75.50
+            }
+            code, resp = self.post_json("/android", payload)
+            self.assertEqual(code, 200)
+            self.assertTrue(resp["ok"])
+            self.assertTrue(resp["dispatched"])
+            self.assertEqual(len(dispatched_list), 1)
+            self.assertEqual(dispatched_list[0]["level"], "alert")
+            self.assertEqual(dispatched_list[0]["nivel"], "alerta")
+            self.assertEqual(dispatched_list[0]["magnitud"], 5.5)
+        finally:
+            ql.GLOBAL_DESK = None
+            ql.GLOBAL_ARGS = None
+
+    def test_post_android_simulacro(self):
+        code, resp = self.post_json("/android", {"nivel": "simulacro", "texto": "prueba de simulacro"})
+        self.assertEqual(code, 200)
+        self.assertTrue(resp["ok"])
+        self.assertEqual(resp["message"], "Android probe drill dispatched")
+
+    def test_post_android_signature_auth(self):
+        args = ql.build_parser().parse_args(["--android-secret", "supersecret123"])
+        ql.GLOBAL_ARGS = args
+        try:
+            payload = {"fuente": "Google Android", "nivel": "alerta", "texto": "prueba"}
+            # Missing signature
+            code, resp = self.post_json("/android", payload)
+            self.assertEqual(code, 401)
+            self.assertFalse(resp["ok"])
+
+            # Bad signature
+            code, resp = self.post_json("/android", payload, {"X-Sismo-Firma": "badhex"})
+            self.assertEqual(code, 401)
+
+            # Good signature
+            raw = json.dumps(payload).encode("utf-8")
+            good_sig = hmac.new(b"supersecret123", raw, hashlib.sha256).hexdigest()
+            code, resp = self.post_json("/android", payload, {"X-Sismo-Firma": good_sig})
+            self.assertEqual(code, 200)
+            self.assertTrue(resp["ok"])
+        finally:
+            ql.GLOBAL_ARGS = None
+            ql.GLOBAL_DESK = None
 
 
 class Cli(unittest.TestCase):

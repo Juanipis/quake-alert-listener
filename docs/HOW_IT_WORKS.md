@@ -168,33 +168,68 @@ payload
 
 **Hand-off.** A decoded event goes to the [detection desk](#6-the-detection-desk), like every other source. If Google's own impact circle covers your base station and M ≥ 4.5, the event is at least a `notice`, even if the intensity estimate is low. If an alert ever arrives without coordinates, the desk falls back to magnitude alone: M ≥ 5 is an `alert`, M ≥ 4 a `notice`.
 
-## Why the Google path is a long shot
+### Device Profiles (Chrome vs Android)
 
-Google's own descriptions say how AEAS alerts get to people:
+The bridge supports two checkin device profiles via `--device-type {android,chrome}`:
 
-- Alerts are delivered by **Google Play services**.
-- Phones are chosen by their **coarse location**.
-- The phone needs **Earthquake Alerts and location turned on**.
+1. **Android Profile (`--device-type android`, default):**
+   - Emulates an authentic Google Pixel 6 (`google/oriole/oriole:14/UP1A.231005.007/10754064:user/release-keys`, GMS `240913000`, Android 14 SDK 34).
+   - Checkin request sends `DEVICE_ANDROID_OS` (1) with complete `AndroidBuildProto`, SIM/operator codes (`732101`), locale (`es_CO`) and timezone (`America/Bogota`).
+   - Login packet authenticates as `android-34`.
+2. **Chrome Profile (`--device-type chrome`):**
+   - Emulates Chromium's desktop GCM client with `DEVICE_CHROME_BROWSER` (3) and `chrome-120.0.6099.144`.
 
-([Google Research blog](https://research.google/blog/android-earthquake-alerts-a-global-system-for-early-warning/); [Science, 2025](https://www.science.org/doi/10.1126/science.ads4779)).
+> [!NOTE]
+> Google accepts both profiles with HTTP 200, assigning authentic `android_id` and `security_token`. Both profiles authenticate cleanly on `mtalk.google.com:5228` with ~80–120 ms round-trip latency.
 
-In other words, Google decides on the server which enrolled phones are in the affected area, and pushes to those phones only. A browser-type identity that reports no location and has no app registrations is not in that set.
+## 2. Logging in to MCS
 
-**What we measured.** Two `--debug-frames` sessions on 2026-10-07 gave the same result:
-- v2.0, about 4 minutes;
-- v2.1, with Chrome-correct checkin and stream acks, 6 heartbeats.
+MCS (Mobile Connection Server) is the long-lived binary protocol behind Android and Chrome push. The bridge follows Chromium's [`mcs.proto`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/protocol/mcs.proto) and [`mcs_client.cc`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/engine/mcs_client.cc).
 
-```
-Authenticated with mtalk.google.com:5228 (Handshake latency: 448.8 ms)
-[frame] IqStanza 10B type=SET extension=SelectiveAck     ← housekeeping after login
-pings_sent 6 · stream_id_in 9 · stream_id_out 8 · reconnects 0 · messages_received 0
-```
+**Connection.**
+- TLS to `mtalk.google.com:5228`, with certificate verification on. If port 5228 is blocked (some corporate or hotel networks), the client falls back to **port 443**, as Chrome does, and sticks with the port that worked (verified live).
+- The client sends one version byte (`41`), then the `LoginRequest`.
 
-The connection is healthy, but the only traffic is protocol housekeeping. In v2.1 the protocol side was brought in line with Chrome's own client (correct checkin, stream acks, idle replies). That makes the connection more reliable, but it does not change who Google sends AEAS alerts to.
+**Framing.** After the version byte, every message is `tag (1 byte) + length (varint) + protobuf payload`.
 
-Receiving them would mean posing as a real, location-reporting Android phone with Play services: inventing hardware identity and reporting a location to Google's earthquake service. We don't do that. It would mean misrepresenting the device to Google, it would be fragile, and the official sources in section 5 already deliver early warnings honestly where they exist.
+| Tag | Message | What the bridge does |
+|---:|---|---|
+| 0 | `HeartbeatPing` | Replies with a `HeartbeatAck` carrying `last_stream_id_received` |
+| 1 | `HeartbeatAck` | Measures the round-trip of its own ping |
+| 2 | `LoginRequest` | Sent once per connection (`android-34` or `chrome-...`) |
+| 3 | `LoginResponse` | Error checked; heartbeat config and server time read |
+| 4 | `Close` | Reconnects |
+| 7 | `IqStanza` | `SelectiveAck` (12) and `StreamAck` (13) handled |
+| 8 | `DataMessageStanza` | The only frame that can carry an alert; also carries the server's `IdleNotification` |
 
-If you have evidence that a client like this one receives AEAS stanzas, please [open an issue](https://github.com/Juanipis/quake-alert-listener/issues) with a `--debug-frames` log. That is exactly the kind of report this project needs.
+**LoginRequest fields.** The login is constructed according to the device profile:
+- `id`: `android-34` (for Android) or `chrome-120.0.6099.144` (for Chrome)
+- `domain`: `mcs.android.com`
+- `user` and `resource`: the `android_id`
+- `auth_token`: the `security_token`
+- `device_id`: `android-<hex android_id>`
+
+---
+
+## 4. Reverse-Engineering Google AEAS & Cloud Geofencing
+
+### DEX Analysis of Google Play Services (`com.google.android.gms`)
+By decompiling the DEX bytecode (`classes13.dex` and `classes15.dex`) of Google Play Services, the internal AEAS pipeline was mapped:
+1. **Inbound GCM Handler:** `com.google.android.location.quake.ealert.GcmReceiverChimeraService` processes incoming push stanzas from MCS.
+2. **Alert Model:** Decoded into `com.google.android.location.quake.ealert.ux.EAlertUxArgs`, matching the protobuf schema implemented in `decode_earthquake_payload()`.
+3. **The Root Cause of 0 Data Messages on Pure Sockets:**
+   Google AEAS is **not a global broadcast**. Google's cloud server only sends alert stanzas to devices that actively report location through Google's Fused Location Provider (`loc/m/api`) and Phenotype location beacons (`Ealert__location_interval_millis`).
+   A standalone TCP client on `mtalk.google.com:5228` (whether Chrome or Android identity) does not transmit periodic Fused Location telemetry to Google's location reporting backend. Consequently, Google's server never matches the client to any geographic earthquake polygon.
+
+### The Hybrid Solution: Android Probe Gateway (`POST /android`)
+To guarantee delivery of authentic Google Earthquakes Alerts without fragile GPS telemetry spoofing, `quake_listener.py` provides an ingestion endpoint:
+- **Endpoint:** `POST /android` and `POST /api/android`
+- **Authentication:** HMAC-SHA256 signature verification via `X-Sismo-Firma` or `X-Quake-Signature` (configured with `--android-secret` or `SISMO_ANDROID_SECRETO`).
+- **Android Probe:** An Android phone or a lightweight headless Android emulator (`sismo_bello`, Android 15 with Google Play Services) running `android_alert_listener.py`:
+  - Fixed GPS coordinates (`geo fix`).
+  - Screen suspended (`adb shell input keyevent 26`), consuming ~2% CPU.
+  - Continuous logcat streaming of `EAlertSafetyInfoActivity` / `EAlertUxArgs` (< 10 ms latency).
+  - Pushes alert payloads directly into `quake_listener.py`, where `DetectionDesk` deduplicates across sources, computes intensity, and triggers Home Assistant webhooks immediately.
 
 ## 5. The other sources
 

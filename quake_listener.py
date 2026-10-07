@@ -334,6 +334,7 @@ CHROME_VERSION = "120.0.6099.144"
 CHECKIN_INTERVAL_S = 2 * 24 * 3600       # Chromium GServicesSettings default
 CHECKIN_MIN_INTERVAL_S = 12 * 3600       # Chromium minimum
 CHECKIN_FORMAT = 2                        # bump when the checkin request layout changes
+DEVICE_ANDROID_OS = 1                     # checkin_proto.DeviceType
 DEVICE_CHROME_BROWSER = 3                 # checkin_proto.DeviceType
 CHANNEL_STABLE = 1
 
@@ -347,15 +348,53 @@ def _chrome_platform():
     return 3       # PLATFORM_LINUX
 
 
-def build_checkin_request(creds=None):
-    """AndroidCheckinRequest laid out exactly like Chrome's GCM client (checkin_request.cc).
+def build_checkin_request(creds=None, device_type=None):
+    """AndroidCheckinRequest supporting Chrome GCM or Android GMS profile.
 
-    A first checkin sends id 0 / token 0; later checkins send the stored identity so
-    Google keeps it alive. Unlike earlier versions, no locale or timezone is sent:
-    Chrome doesn't send them either.
+    Supports 'chrome' (Chromium GCM client) and 'android' (Pixel 6 Android GMS client).
     """
     android_id = int(creds["android_id"]) if creds else 0
     token = int(creds["security_token"]) if creds else 0
+    dtype = device_type or (creds.get("device_type") if creds else None) or "chrome"
+    if dtype == "android":
+        build_proto = (
+            field_str(1, "google/oriole/oriole:14/UP1A.231005.007/10754064:user/release-keys") +
+            field_str(2, "oriole") +
+            field_str(3, "Google") +
+            field_str(4, "g5123b-230810-230919-B-10762410") +
+            field_str(5, "slider-1.2-10492471") +
+            field_str(6, "android-google") +
+            field_varint(7, int(time.time())) +
+            field_varint(8, 240913000) +
+            field_str(9, "oriole") +
+            field_varint(10, 34) +
+            field_str(11, "Pixel 6") +
+            field_str(12, "Google") +
+            field_str(13, "oriole") +
+            field_varint(14, 0)
+        )
+        checkin = (
+            field_bytes(1, build_proto) +
+            field_varint(2, 0) +
+            field_str(6, "732101") +
+            field_str(7, "732101") +
+            field_str(8, "mobile-notroaming") +
+            field_varint(9, 0) +
+            field_varint(12, DEVICE_ANDROID_OS)
+        )
+        body = field_varint(2, android_id)
+        if creds and creds.get("digest"):
+            body += field_str(3, creds["digest"])
+        body += (
+            field_bytes(4, checkin) +
+            field_str(6, (creds.get("locale") if creds else None) or "es_CO") +
+            field_str(12, (creds.get("timezone") if creds else None) or "America/Bogota") +
+            field_fixed64(13, token) +
+            field_varint(14, 3) +
+            field_varint(22, 0)
+        )
+        return body
+
     chrome_build = (field_varint(1, _chrome_platform()) +       # platform
                     field_str(2, CHROME_VERSION) +               # chrome_version
                     field_varint(3, CHANNEL_STABLE))             # channel
@@ -423,9 +462,10 @@ def now_corrected():
     return time.time()
 
 
-def checkin(creds=None):
+def checkin(creds=None, device_type=None):
     """Run a GCM checkin (new identity if creds is None). Returns the updated creds dict."""
-    body = build_checkin_request(creds)
+    dtype = device_type or (creds.get("device_type") if creds else None) or "chrome"
+    body = build_checkin_request(creds, device_type=dtype)
     req = urllib.request.Request(CHECKIN_URL, data=body,
                                  headers={"Content-Type": "application/x-protobuf"}, method="POST")
     t0 = time.time()
@@ -454,7 +494,7 @@ def checkin(creds=None):
         "last_checkin": now,
         "checkin_interval_s": interval,
         "digest": r["digest"] or (creds or {}).get("digest"),
-        "device_type": "chrome_browser",
+        "device_type": dtype,
         "checkin_format": CHECKIN_FORMAT,
     })
     for legacy in ("locale", "time_zone"):
@@ -462,22 +502,23 @@ def checkin(creds=None):
     if creds and int(creds["android_id"]) != aid:
         log("Google assigned a new device identity during checkin.")
     _update_mcs_state(last_checkin_ts=round(now, 1), checkin_interval_s=interval,
-                      device_type="chrome_browser")
+                      device_type=dtype)
     return new
 
 
 def _save_creds_logged(creds, what):
     try:
         save_credentials(creds)
-        log(f"{what} (id: {creds['android_id']}); saved to {CREDENTIALS_FILE}")
+        log(f"{what} (id: {creds['android_id']}, type: {creds.get('device_type', 'chrome')}); saved to {CREDENTIALS_FILE}")
     except OSError as e:
         log(f"{what} (id: {creds['android_id']}) but could not save {CREDENTIALS_FILE}: {e}.")
 
 
-def register_device(locale="en_US", tz="UTC"):
-    """Register a fresh anonymous identity (locale/tz are no longer sent, kept for API compat)."""
-    log("Registering anonymous device identity (Chrome GCM checkin)...")
-    creds = checkin(None)
+def register_device(locale="en_US", tz="UTC", device_type=None):
+    """Register a fresh anonymous identity."""
+    dtype = device_type or "chrome"
+    log(f"Registering anonymous device identity ({dtype.capitalize()} GCM checkin)...")
+    creds = checkin(None, device_type=dtype)
     _save_creds_logged(creds, "Device registered successfully")
     return creds
 
@@ -491,19 +532,21 @@ def checkin_due(creds, now=None):
     return now - float(last) >= float(creds.get("checkin_interval_s") or CHECKIN_INTERVAL_S)
 
 
-def refresh_checkin(creds):
+def refresh_checkin(creds, device_type=None):
     """Periodic checkin with the stored identity (as Chrome does every ~2 days).
 
     Returns updated creds, or the old ones if the checkin failed (it is retried later).
     """
     legacy = creds.get("checkin_format") != CHECKIN_FORMAT
+    dtype = device_type or creds.get("device_type", "chrome")
     try:
-        new = checkin(creds)
+        new = checkin(creds, device_type=dtype)
     except Exception as e:
         log(f"Periodic checkin failed ({e}); keeping the current identity and retrying later.")
         creds["last_checkin"] = time.time() - float(creds.get("checkin_interval_s") or CHECKIN_INTERVAL_S) + 3600
         return creds
-    _save_creds_logged(new, "Identity re-checked in as a Chrome GCM client" if legacy else "Periodic checkin done")
+    desc = f"Identity re-checked in as a {dtype.capitalize()} GCM client" if legacy else "Periodic checkin done"
+    _save_creds_logged(new, desc)
     return new
 
 
@@ -515,7 +558,7 @@ def _valid_credentials(creds):
         return False
 
 
-def get_credentials(locale="en_US", tz="UTC"):
+def get_credentials(locale="en_US", tz="UTC", device_type=None):
     path = CREDENTIALS_FILE
     if os.path.isfile(path):
         try:
@@ -524,6 +567,11 @@ def get_credentials(locale="en_US", tz="UTC"):
             if _valid_credentials(creds):
                 creds["android_id"] = int(creds["android_id"])
                 creds["security_token"] = int(creds["security_token"])
+                stored_dtype = "chrome" if creds.get("device_type") in ("chrome", "chrome_browser") else creds.get("device_type")
+                req_dtype = "chrome" if device_type in ("chrome", "chrome_browser") else device_type
+                if req_dtype and stored_dtype != req_dtype:
+                    log(f"Credentials device_type ({creds.get('device_type')}) differs from requested {device_type}; registering fresh identity.")
+                    return register_device(locale, tz, device_type=device_type)
                 if os.name == "posix":
                     try:
                         if os.stat(path).st_mode & 0o077:
@@ -535,7 +583,7 @@ def get_credentials(locale="en_US", tz="UTC"):
             log(f"Credentials file {path} is incomplete; registering a new identity.")
         except (OSError, ValueError) as e:
             log(f"Could not read credentials file {path} ({e}); registering a new identity.")
-    return register_device(locale, tz)
+    return register_device(locale, tz, device_type=device_type)
 
 
 # ==============================================================================
@@ -670,6 +718,7 @@ class QuakeMCSClient:
     def __init__(self, creds, ping_interval=120):
         self.android_id = int(creds["android_id"])
         self.security_token = int(creds["security_token"])
+        self.device_type = creds.get("device_type", "chrome")
         self.ping_interval = max(30, min(int(ping_interval), 600))
         self.user_ping_interval = self.ping_interval
         self.server_heartbeat_s = None
@@ -715,8 +764,9 @@ class QuakeMCSClient:
     def _login_packet(self):
         new_vc = field_str(1, "new_vc") + field_str(2, "1")
         hbping = field_str(1, "hbping") + field_str(2, str(self.user_ping_interval * 1000))
+        auth_id = "android-34" if self.device_type == "android" else f"chrome-{CHROME_VERSION}"
         login_req = (
-            field_str(1, f"chrome-{CHROME_VERSION}") +
+            field_str(1, auth_id) +
             field_str(2, "mcs.android.com") +
             field_str(3, str(self.android_id)) +
             field_str(4, str(self.android_id)) +
@@ -1042,6 +1092,7 @@ class QuakeMCSClient:
 
 GLOBAL_CLIENT = None
 GLOBAL_ARGS = None
+GLOBAL_DESK = None
 
 STATE_LOCK = threading.RLock()
 STATE = {
@@ -1090,7 +1141,7 @@ def _new_source_state():
             "connected_since": None, "reconnects": 0, "errors": 0, "last_error": None}
 
 
-STATE["sources"] = {k: _new_source_state() for k in ("emsc", "wolfx", "shake")}
+STATE["sources"] = {k: _new_source_state() for k in ("emsc", "wolfx", "shake", "android")}
 STATE["emsc"] = STATE["sources"]["emsc"]   # v1.2 field name, kept for existing clients
 
 
@@ -1508,7 +1559,9 @@ class DetectionDesk:
     def level_for(self, mmi, ev, impact=None):
         a = self.args
         floor = None
-        if ev["kind"] == "aeas":
+        if ev.get("force_level") and ev["force_level"] in ("alert", "notice"):
+            floor = ev["force_level"]
+        elif ev["kind"] == "aeas":
             radius = ev.get("radius_km")
             mag = ev.get("magnitude") or 0
             if impact and impact["distance_km"] is not None and radius and impact["distance_km"] <= radius and mag >= 4.5:
@@ -1566,10 +1619,11 @@ class DetectionDesk:
 
             if impact["age_s"] is not None and impact["age_s"] > MAX_EVENT_AGE_S:
                 return None
-            if mag is not None and mag < a.min_magnitude:
-                return None
-            if impact["distance_km"] > a.max_distance_km:
-                return None
+            if not ev.get("force_level"):
+                if mag is not None and mag < a.min_magnitude:
+                    return None
+                if impact["distance_km"] > a.max_distance_km:
+                    return None
 
             level = self.level_for(impact["estimated_mmi"], ev, impact)
             if level is None:
@@ -1590,16 +1644,19 @@ class DetectionDesk:
         return payload
 
     def _submit_unlocated(self, ev, mag):
-        """An alert without coordinates (possible for AEAS): fall back to magnitude only."""
-        if mag is None or mag < max(4.0, self.args.min_magnitude):
+        """An alert without coordinates (possible for AEAS / Android probe): fall back to magnitude or force level."""
+        if ev.get("force_level") and ev["force_level"] in ("alert", "notice"):
+            level = ev["force_level"]
+        elif mag is None or mag < max(4.0, self.args.min_magnitude):
             return None
-        level = "alert" if mag >= 5.0 else "notice"
+        else:
+            level = "alert" if mag >= 5.0 else "notice"
         key = (ev["source"], ev["event_id"])
         with self.lock:
             if key in self.sent:
                 return None
             self.sent[key] = {"level": level, "mmi": None, "origin_ts": None, "lat": None, "lon": None}
-        impact = {"distance_km": None, "hypocentral_km": None, "estimated_mmi": None,
+        impact = {"distance_km": ev.get("radius_km"), "hypocentral_km": None, "estimated_mmi": None,
                   "p_wave_arrival_ts": None, "s_wave_arrival_ts": None, "s_wave_eta_s": None, "age_s": None}
         payload = self._payload(ev, impact, level)
         self.record(payload)
@@ -1621,7 +1678,9 @@ class DetectionDesk:
         mag = ev.get("magnitude")
         mmi = impact["estimated_mmi"]
         region = ev.get("region") or (f"{ev['lat']:.2f}, {ev['lon']:.2f}" if ev.get("lat") is not None else "unknown location")
-        if ev["kind"] == "onsite":
+        if ev.get("raw_text") and ev.get("lat") is None:
+            place = ev["raw_text"]
+        elif ev["kind"] == "onsite":
             place = f"On-site P-wave trigger at {a.name} ({ev.get('detail', 'STA/LTA')})"
         else:
             bits = [f"M{mag}" if mag is not None else "Earthquake", region]
@@ -2145,6 +2204,80 @@ def _script_dir():
     return None  # e.g. `curl ... | python3 -`
 
 
+def android_probe_event(data):
+    """Normalize payload from Android device / probe (e.g. android_alert_listener.py)."""
+    mag = data.get("magnitud") if "magnitud" in data else data.get("magnitude")
+    if mag is not None:
+        try:
+            mag = float(mag)
+        except (TypeError, ValueError):
+            mag = None
+    lat = data.get("lat") if "lat" in data else data.get("latitude")
+    if lat is not None:
+        try:
+            lat = float(lat)
+        except (TypeError, ValueError):
+            lat = None
+    lon = data.get("lon") if "lon" in data else data.get("longitude")
+    if lon is not None:
+        try:
+            lon = float(lon)
+        except (TypeError, ValueError):
+            lon = None
+    dist = data.get("distancia_km") if "distancia_km" in data else data.get("distance_km")
+    if dist is not None:
+        try:
+            dist = float(dist)
+        except (TypeError, ValueError):
+            dist = None
+
+    raw_ts = data.get("detectado") or data.get("origin_ts") or data.get("timestamp")
+    origin_ts = None
+    if isinstance(raw_ts, (int, float)):
+        origin_ts = float(raw_ts)
+    elif isinstance(raw_ts, str):
+        try:
+            origin_ts = float(raw_ts)
+        except ValueError:
+            origin_ts = parse_iso_time(raw_ts)
+    if origin_ts is None:
+        origin_ts = time.time()
+
+    nivel = str(data.get("nivel") or data.get("level") or "alerta").lower()
+    source = data.get("fuente") or data.get("source") or "Google Android (Probe)"
+    text = data.get("texto") or data.get("text") or data.get("place") or data.get("lugar") or "Android Earthquake Alert"
+    region = data.get("region") or data.get("lugar") or (f"Epicenter ({lat:.2f}, {lon:.2f})" if lat is not None and lon is not None else "Local Device Alert")
+
+    force_level = None
+    if nivel in ("alerta", "alert", "take action", "take_action"):
+        force_level = "alert"
+    elif nivel in ("aviso", "notice", "be aware", "be_aware"):
+        force_level = "notice"
+    elif nivel in ("simulacro", "drill"):
+        force_level = "drill"
+
+    return {
+        "source": source,
+        "kind": "aeas",
+        "event_id": str(data.get("id") or data.get("alert_id") or _new_event_id("android")),
+        "revision": None,
+        "origin_ts": origin_ts,
+        "lat": lat,
+        "lon": lon,
+        "depth_km": None,
+        "magnitude": mag,
+        "magnitude_type": None,
+        "region": region,
+        "radius_km": dist,
+        "url": None,
+        "final": None,
+        "cancelled": False,
+        "training": False,
+        "force_level": force_level,
+        "raw_text": text,
+    }
+
+
 class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
     server_version = f"QuakeListener/{__version__}"
     timeout = 15  # drop clients that stall mid-request
@@ -2255,17 +2388,112 @@ class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):
-        self._discard_body()
         if not self._host_ok():
             log(f"Rejected {self.command} for foreign Host {self.headers.get('Host')!r}")
+            self._discard_body()
             return
         clean_path = self._clean_path()
-        if clean_path not in ("/drill", "/simulacro", "/ping"):
+        if clean_path not in ("/drill", "/simulacro", "/ping", "/android", "/api/android"):
+            self._discard_body()
             self._send_json(404, {"ok": False, "error": "not found"})
             return
         if not self._origin_ok():
             log(f"Rejected POST {clean_path} from disallowed origin {self.headers.get('Origin')!r}")
+            self._discard_body()
             return
+
+        if clean_path in ("/android", "/api/android"):
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if length <= 0 or length > 64 * 1024:
+                self._send_json(400, {"ok": False, "error": "invalid content length"})
+                return
+            raw_body = self.rfile.read(length)
+
+            secret = getattr(GLOBAL_ARGS, "android_secret", "") if GLOBAL_ARGS else ""
+            if not secret:
+                secret = os.environ.get("SISMO_ANDROID_SECRETO") or (getattr(GLOBAL_ARGS, "webhook_secret", "") if GLOBAL_ARGS else "") or os.environ.get("QUAKE_WEBHOOK_SECRET") or ""
+            if secret:
+                sig = self.headers.get("X-Sismo-Firma") or self.headers.get("X-Quake-Signature") or ""
+                expected_sig = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+                if not hmac.compare_digest(expected_sig.lower(), sig.lower()):
+                    log("Rejected POST /android: HMAC signature mismatch")
+                    self._send_json(401, {"ok": False, "error": "invalid signature"})
+                    return
+
+            try:
+                data = json.loads(raw_body.decode("utf-8"))
+                if not isinstance(data, dict):
+                    raise ValueError("JSON payload must be an object")
+            except Exception as e:
+                self._send_json(400, {"ok": False, "error": f"malformed JSON: {e}"})
+                return
+
+            event = android_probe_event(data)
+            _update_source_state("android", enabled=True, connected=True, last_event_ts=time.time())
+            with STATE_LOCK:
+                STATE["sources"]["android"]["events_received"] += 1
+
+            if event.get("force_level") == "drill":
+                log("📣 Android probe safety drill received")
+                now = dt.datetime.now()
+                with STATE_LOCK:
+                    name = STATE["location"]["name"]
+                drill_payload = {
+                    "level": "drill",
+                    "nivel": "simulacro",
+                    "source": event["source"],
+                    "id": event["event_id"],
+                    "magnitude": event.get("magnitude") or 5.0,
+                    "magnitud": event.get("magnitude") or 5.0,
+                    "place": event.get("raw_text") or f"Safety Drill Simulation at {name}",
+                    "lugar": event.get("raw_text") or f"Simulacro de Seguridad en {name}",
+                    "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
+                    "hora_local": now.strftime("%H:%M:%S")
+                }
+                status = dispatch_webhook(drill_payload, attempts=1, timeout=6)
+                self._send_json(200, {
+                    "ok": True,
+                    "message": "Android probe drill dispatched",
+                    "webhook_status": status
+                })
+                return
+
+            log(f"📱 Ingested Android alert probe: {event.get('raw_text', event.get('region', 'quake'))} "
+                f"(level: {event.get('force_level') or 'auto'})")
+
+            dispatched = None
+            if GLOBAL_DESK is not None:
+                dispatched = GLOBAL_DESK.submit(event)
+            elif GLOBAL_ARGS and GLOBAL_ARGS.webhook_url:
+                with STATE_LOCK:
+                    name = STATE["location"]["name"]
+                level = event.get("force_level") or "notice"
+                nivel = {"alert": "alerta", "notice": "aviso"}.get(level, level)
+                now_str = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                dispatched = {
+                    "level": level, "nivel": nivel, "source": event["source"],
+                    "kind": "aeas", "status": "early alert", "id": f"aeas-{event['event_id']}",
+                    "event_id": event["event_id"], "magnitude": event.get("magnitude"),
+                    "magnitud": event.get("magnitude"), "lat": event.get("lat"), "lon": event.get("lon"),
+                    "distance_km": event.get("radius_km"), "distancia_km": event.get("radius_km"),
+                    "place": event.get("raw_text") or f"Android Alert at {name}",
+                    "lugar": event.get("raw_text") or f"Alerta Android en {name}",
+                    "timestamp": now_str, "hora_local": now_str
+                }
+                dispatch_webhook_async(dispatched)
+
+            self._send_json(200, {
+                "ok": True,
+                "dispatched": dispatched is not None,
+                "event_id": event["event_id"],
+                "payload": dispatched
+            })
+            return
+
+        self._discard_body()
 
         if clean_path in ("/drill", "/simulacro"):
             log("📣 Safety drill triggered via HTTP REST API")
@@ -2437,7 +2665,7 @@ def _run_session(client, dispatch_alert):
 
 
 def run_listener(args):
-    global GLOBAL_CLIENT, GLOBAL_ARGS
+    global GLOBAL_CLIENT, GLOBAL_ARGS, GLOBAL_DESK
     GLOBAL_ARGS = args
 
     with STATE_LOCK:
@@ -2474,6 +2702,7 @@ def run_listener(args):
             dispatch_webhook_async(payload)
 
     desk = DetectionDesk(args, record_detection)
+    GLOBAL_DESK = desk
 
     def dispatch_alert(ev):
         desk.submit(aeas_event(ev))
@@ -2505,6 +2734,7 @@ def run_listener(args):
     creds = None
     rejections = 0
     backoff = BACKOFF_MIN_S
+    dtype = getattr(args, "device_type", "android")
     try:
         if "mcs" not in args.sources:
             log("Google MCS source disabled (--sources); following the other feeds only.")
@@ -2515,12 +2745,12 @@ def run_listener(args):
             reason = None
             try:
                 if client is None:
-                    creds = get_credentials(args.locale, args.timezone)
+                    creds = get_credentials(args.locale, args.timezone, device_type=dtype)
                     _update_mcs_state(last_checkin_ts=creds.get("last_checkin"),
                                       checkin_interval_s=creds.get("checkin_interval_s"),
                                       device_type=creds.get("device_type", "legacy"))
                 if checkin_due(creds):
-                    creds = refresh_checkin(creds)
+                    creds = refresh_checkin(creds, device_type=dtype)
                 if (client is None or client.android_id != int(creds["android_id"])
                         or client.security_token != int(creds["security_token"])):
                     old = client
@@ -2632,9 +2862,10 @@ def test_ping(args=None):
     tz = args.timezone if args else "UTC"
     client = None
     try:
-        creds = get_credentials(locale, tz)
+        dtype = getattr(args, "device_type", "android") if args else "android"
+        creds = get_credentials(locale, tz, device_type=dtype)
         if checkin_due(creds):
-            creds = refresh_checkin(creds)
+            creds = refresh_checkin(creds, device_type=dtype)
         client = QuakeMCSClient(creds)
         client.connect()
         client.send_ping()
@@ -2750,6 +2981,8 @@ def build_parser():
     parser.add_argument("--webhook-url", type=_webhook_url, default=env("QUAKE_WEBHOOK_URL", ""), help="Webhook destination URL (e.g. Home Assistant)")
     parser.add_argument("--webhook-secret", type=str, default=env("QUAKE_WEBHOOK_SECRET", ""), help="Optional HMAC-SHA256 secret for payload signing (prefer the env var: CLI args are visible in `ps`)")
     parser.add_argument("--credentials-file", type=str, default=env("QUAKE_CREDENTIALS_FILE", DEFAULT_CREDENTIALS_FILE), help="Where the anonymous device identity is stored (default: ~/.quake_device_credentials.json)")
+    parser.add_argument("--device-type", choices=["android", "chrome"], default=env("QUAKE_DEVICE_TYPE", "android"), help="Device checkin identity profile: android (GMS Pixel 6 profile) or chrome (Chromium GCM profile). Default: android")
+    parser.add_argument("--android-secret", type=str, default=env("SISMO_ANDROID_SECRETO", env("QUAKE_ANDROID_SECRET", "")), help="Optional HMAC-SHA256 secret to verify incoming alerts from android_alert_listener.py (falls back to SISMO_ANDROID_SECRETO env var)")
     parser.add_argument("--locale", type=str, default=env("QUAKE_LOCALE", "en_US"), help="Locale for device registration")
     parser.add_argument("--timezone", type=str, default=env("QUAKE_TIMEZONE", "UTC"), help="Timezone for device registration")
     parser.add_argument("--sources", type=_sources, default=env("QUAKE_SOURCES", "mcs,emsc,wolfx"), help="Push sources to follow: mcs (Google AEAS, experimental), emsc (worldwide rapid reports), wolfx (official early warnings for Japan and China). Default: mcs,emsc,wolfx")
