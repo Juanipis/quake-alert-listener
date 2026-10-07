@@ -36,54 +36,107 @@ Sections 1–4 cover the Google path in depth (it is the most involved protocol)
 
 ## 1. Getting an identity: checkin
 
-Before anything can log in to MCS, it needs an `android_id` and a `security_token`. The bridge gets them the same way Chrome's built-in GCM client does.
+Before anything can log in to MCS, it needs an `android_id` and a `security_token`. The bridge gets them exactly the way Chrome's built-in GCM client does.
 
-- **Request:** a protobuf `POST` to `https://android.clients.google.com/checkin`.
-- **What it claims to be:** a Chrome build (`chrome_build { platform: 2, version: "120.0.6099.144", channel: 1 }`), with checkin `type: 3`. It also sends the locale (default `en_US`) and timezone (default `UTC`).
-- **Response fields used:** field `7` is `android_id` and field `8` is `security_token`, both 64-bit integers.
-- **Storage:** they are saved to `~/.quake_device_credentials.json` (or `--credentials-file`) with `0600` permissions and reused on later starts.
+**Reference.** The implementation was checked field by field against Chromium's open-source client:
+- [`checkin.proto` / `android_checkin.proto`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/protocol/)
+- [`checkin_request.cc`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/engine/checkin_request.cc)
+
+**Request.** A protobuf `POST` to `https://android.clients.google.com/checkin` containing:
+
+| Field | Value | Notes |
+|---|---|---|
+| `2` id | `0` on first checkin, then the stored `android_id` | |
+| `3` digest | the settings digest from the last response | |
+| `4` checkin | `{ 12 type: DEVICE_CHROME_BROWSER (3), 13 chrome_build { platform, "120.0.6099.144", STABLE } }` | |
+| `13` security_token | `0`, then the stored token | `fixed64` |
+| `14` version | `3` | |
+| `22` user_serial_number | `0` | |
+
+No locale, timezone or hardware identifiers are sent; Chrome doesn't send them either.
+
+> [!NOTE]
+> Versions up to 2.0 put the device type and Chrome build in fields 1 and 2 of the checkin block instead of 12 and 13. Google then registered a default *Android OS* device with no build info.
+>
+> 2.1 sends the correct layout. A credentials file from an older version is re-checked in once on start, keeping the same `android_id`; this was verified live.
+
+**Response.**
+- `android_id` (field 7) and `security_token` (field 8) are `fixed64`.
+- `time_ms` (field 3) is the server clock, used for the [clock check](#clock-check).
+- `digest` (field 4) and `setting` (field 5) are Google's settings. Of these, only `checkin_interval` is used.
+
+**Periodic checkin.** Like Chrome, the bridge checks in again every `checkin_interval`: 2 days by default, never less than 12 hours. This keeps the identity alive.
+
+**Storage.** The identity is saved to `~/.quake_device_credentials.json` (or `--credentials-file`) with mode `0600`, together with the last checkin time, interval and digest.
 
 > [!IMPORTANT]
-> This identity is a **browser-type GCM client**. It is not an Android phone, it has no Google Play services, it reports no location, and it is not registered (`register3`) with any sender or app. Keep that in mind for section 4.
+> This identity is a **browser-type GCM client**. It is not an Android phone and has no Google Play services. It reports no location and is not registered (`register3`) with any sender or app; `/status` shows `"registrations": 0`. Keep that in mind for section 4.
 
 ## 2. Logging in to MCS
 
-MCS (Mobile Connection Server) is the long-lived binary protocol behind Android and Chrome push.
+MCS (Mobile Connection Server) is the long-lived binary protocol behind Android and Chrome push. The bridge follows Chromium's [`mcs.proto`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/protocol/mcs.proto) and [`mcs_client.cc`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/engine/mcs_client.cc).
 
 **Connection.**
-- TLS to `mtalk.google.com:5228`, with certificate verification on.
+- TLS to `mtalk.google.com:5228`, with certificate verification on. If port 5228 is blocked (some corporate or hotel networks), the client falls back to **port 443**, as Chrome does, and sticks with the port that worked (verified live).
 - The client sends one version byte (`41`), then the `LoginRequest`.
 
 **Framing.** After the version byte, every message is `tag (1 byte) + length (varint) + protobuf payload`.
 
 | Tag | Message | What the bridge does |
 |---:|---|---|
-| 0 | `HeartbeatPing` | Replies with a `HeartbeatAck` |
+| 0 | `HeartbeatPing` | Replies with a `HeartbeatAck` carrying `last_stream_id_received` |
 | 1 | `HeartbeatAck` | Measures the round-trip of its own ping |
 | 2 | `LoginRequest` | Sent once per connection |
-| 3 | `LoginResponse` | Checked for an error field; a rejection is reported as `Login rejected by MCS` |
+| 3 | `LoginResponse` | Error checked; heartbeat config and server time read |
 | 4 | `Close` | Reconnects |
-| 7 | `IqStanza` | Counted (the server uses these for acks) |
-| 8 | `DataMessageStanza` | The only frame that can carry an alert |
+| 7 | `IqStanza` | `SelectiveAck` (12) and `StreamAck` (13) handled |
+| 8 | `DataMessageStanza` | The only frame that can carry an alert; also carries the server's `IdleNotification` |
 
-**LoginRequest fields.** The login sends:
+**LoginRequest fields.** The login is the same as Chrome's `BuildLoginRequest`:
 - `id`: `chrome-120.0.6099.144`
 - `domain`: `mcs.android.com`
 - `user` and `resource`: the `android_id`
 - `auth_token`: the `security_token`
 - `device_id`: `android-<hex android_id>`
-- the `new_vc` setting
-- `received_persistent_id` (repeated) for messages already handled, so Google does not resend them
-- `adaptive_heartbeat`, `use_rmq2` and `auth_service`
+- `adaptive_heartbeat`: false
+- `use_rmq2`: true
+- `auth_service`: `ANDROID_ID`
+- `network_type`: 1
+- settings: `new_vc=1`, plus `hbping=<interval ms>` to announce our heartbeat interval, which Chrome sends for custom intervals
+- `received_persistent_id`: every message id the server hasn't confirmed yet (see section 3)
+
+**LoginResponse.**
+- An error code other than 0 raises `MCSLoginRejected`. The bridge then re-checks in the identity once; if the next login also fails, it registers a fresh identity.
+- `heartbeat_config.interval_ms` is honoured when it is *shorter* than ours. The bridge never pings less often than configured, because noticing a dead link fast matters here.
+- `server_timestamp` feeds the clock check.
 
 **Reads.** Reads go through a buffer with a 0.5 s timeout. A frame split across TLS records is reassembled, not treated as an error. Frames over 4 MB and varints over 10 bytes are rejected as corrupt.
 
 ## 3. Staying connected
 
-- **Heartbeats.** Every `--ping-interval` seconds (clamped to 30–600, default 120) the client sends a `HeartbeatPing` from the listener thread. `latency_ms` in `/status` is the real ping → ack round-trip. The TLS connect time is reported separately as `handshake_latency_ms`.
-- **Dead links.** If nothing arrives for `ping_interval + 60` s, the connection is considered dead and reopened. TCP keepalive is also on.
-- **Reconnects.** Backoff runs from 3 s to 60 s with jitter, and resets after a session that lasted at least 60 s.
-- **Manual pings.** `POST /ping` only *asks* the listener thread to ping, so the HTTP thread never writes to the TLS socket.
+**Heartbeats.**
+- Every `--ping-interval` seconds (clamped to 30–600, default 120) the client sends a `HeartbeatPing` from the listener thread.
+- `latency_ms` in `/status` is the real ping → ack round-trip. The TLS connect time is reported separately as `handshake_latency_ms`.
+
+**Heartbeat timeout.** As in Chrome, any packet counts as an ack. If nothing arrives within 60 s of a ping, the link is considered dead and reopened. TCP keepalive is also on, and a session with no traffic at all for `ping_interval + 60` s is also reset.
+
+**Acknowledgements (stream ids).** Each side counts the packets it has received; the `LoginResponse` is stream id 1.
+- Every packet the bridge sends carries `last_stream_id_received`, which tells the server what has arrived.
+- The bridge sends an explicit `StreamAck` (an `IqStanza` with extension 13) after every 10 unacknowledged messages, or at once when a message asks for `immediate_ack`.
+- A message id counts as confirmed once the server echoes a `last_stream_id_received` that covers it. Ids not yet confirmed go into the next `LoginRequest`.
+- This is what stops Google from re-delivering the same message after a reconnect.
+
+**Idle notifications.** The server can send a `DataMessageStanza` in category `com.google.android.gsf.gtalkservice` with `IdleNotification`. The bridge answers `false`, as Chrome does, so it is not treated as an idle client.
+
+**Reconnects.** Backoff runs from 3 s to 60 s with jitter, and resets after a session that lasted at least 60 s.
+
+**Manual pings.** `POST /ping` only *asks* the listener thread to ping, so the HTTP thread never writes to the TLS socket.
+
+### Clock check
+
+Both the checkin response and the `LoginResponse` carry Google's clock. The bridge measures the offset against the midpoint of each request, which is accurate to about half a network round-trip, and publishes it as `clock.offset_s` in `/status`.
+
+S-wave countdowns depend on the local clock, so an offset of 2 s or more is logged, and `now` is corrected by it when computing countdowns. If you see this warning, enable NTP on the machine.
 
 ## 4. Data messages and the AEAS decoder
 
@@ -127,15 +180,19 @@ Google's own descriptions say how AEAS alerts get to people:
 
 In other words, Google decides on the server which enrolled phones are in the affected area, and pushes to those phones only. A browser-type identity that reports no location and has no app registrations is not in that set.
 
-**What we measured.** The listener ran with `--debug-frames` for about four minutes on 2026-10-07:
+**What we measured.** Two `--debug-frames` sessions on 2026-10-07 gave the same result:
+- v2.0, about 4 minutes;
+- v2.1, with Chrome-correct checkin and stream acks, 6 heartbeats.
 
 ```
-Authenticated with mtalk.google.com:5228 (Handshake latency: 408.3 ms)
-[frame] IqStanza 10B type=1 extension=12      ← a selective ack, nothing else
-pings_sent 6 · pings_received 8 · messages_received 0 · latency_ms 91.2
+Authenticated with mtalk.google.com:5228 (Handshake latency: 448.8 ms)
+[frame] IqStanza 10B type=SET extension=SelectiveAck     ← housekeeping after login
+pings_sent 6 · stream_id_in 9 · stream_id_out 8 · reconnects 0 · messages_received 0
 ```
 
-The connection is healthy, but the only traffic is protocol housekeeping. Making Google send AEAS alerts would mean posing as a real, location-reporting Android device with Play services. We don't do that: it would mean misrepresenting the device to Google, and it would be fragile anyway.
+The connection is healthy, but the only traffic is protocol housekeeping. In v2.1 the protocol side was brought in line with Chrome's own client (correct checkin, stream acks, idle replies). That makes the connection more reliable, but it does not change who Google sends AEAS alerts to.
+
+Receiving them would mean posing as a real, location-reporting Android phone with Play services: inventing hardware identity and reporting a location to Google's earthquake service. We don't do that. It would mean misrepresenting the device to Google, it would be fragile, and the official sources in section 5 already deliver early warnings honestly where they exist.
 
 If you have evidence that a client like this one receives AEAS stanzas, please [open an issue](https://github.com/Juanipis/quake-alert-listener/issues) with a `--debug-frames` log. That is exactly the kind of report this project needs.
 

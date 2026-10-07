@@ -996,7 +996,7 @@
         <ul class="checks">
           <li><svg class="i ok"><use href="#i-check"/></svg>Official EEW feed (JMA, CENC)<span>live</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>EMSC worldwide feed<span>live</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>26 tests</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>35 tests</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>Raspberry Shake STA/LTA trigger<span>synthetic</span></li>
           <li><svg class="i wait"><use href="#i-clock"/></svg>An AEAS alert reaching this client<span>never seen</span></li>
         </ul>
@@ -1498,7 +1498,13 @@
       state.prev = cur;
       setCount('#st-pings', cur.pings);
       $('#st-msgs').textContent = `${cur.msgs} data message${cur.msgs === 1 ? '' : 's'}`;
-      if (g.android_id) $('#st-hwid').textContent = `device ${maskId(g.android_id)}`;
+      if (g.android_id) {
+        const off = d.clock && d.clock.offset_s;
+        const clock = off == null ? '' : ` · clock ${off >= 0 ? '+' : ''}${off.toFixed(2)} s`;
+        $('#st-hwid').textContent = `device ${maskId(g.android_id)}${clock}`;
+        $('#st-hwid').title = off != null && Math.abs(off) >= 2
+          ? 'Local clock differs from Google time; countdowns are corrected. Enable NTP.' : 'Anonymous device ID and clock offset vs Google';
+      }
       const src = d.sources || (d.emsc ? { emsc: d.emsc } : {});
       const names = { wolfx: 'EEW', emsc: 'EMSC', shake: 'Shake' };
       const on = [], off = [];

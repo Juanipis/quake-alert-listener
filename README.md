@@ -45,6 +45,7 @@ Notification levels follow Android's own thresholds:
 - **Ultra-Lightweight:** Consumes less than **15 MB of RAM** and **0.0% CPU** at idle. Perfect for running 24/7 on a Raspberry Pi, home server, or Docker container.
 - **Configurable Keepalive Pings:** Network-friendly ping intervals (`--ping-interval 120`, configurable between 30s and 600s) with exponential backoff on reconnects.
 - **Four Sources, One Policy:** official early warnings (Wolfx relay of JMA / CENC), EMSC's worldwide feed, an optional Raspberry Shake on-site trigger, and Google's MCS channel. Duplicates of the same quake across sources are merged; you're only notified again if things get worse, and cancelled warnings are announced as cancelled.
+- **Chrome-Accurate MCS Client:** checkin, login, stream acknowledgements, idle replies and the port-443 fallback follow Chromium's own GCM client; identities re-check in every 2 days, and Google's clock is used to keep countdowns honest (see [HOW_IT_WORKS §1–3](docs/HOW_IT_WORKS.md#1-getting-an-identity-checkin)).
 - **Local Impact, Not Just Magnitude:** every payload carries `estimated_mmi`, `mmi_label`, `distance_km`, `hypocentral_km` and `s_wave_eta_s`, so automations can say *"Shaking in 18 seconds"*.
 - **Home Assistant Native Integration:** Automatically dispatches structured local webhooks to Home Assistant including magnitude, coordinates, epicenter distance in kilometers, and severity level.
 - **Interactive Web Demo:** Includes an interactive [GitHub Pages](https://juanipis.github.io/quake-alert-listener/) web app that detects your local coordinates and generates a ready-to-run CLI command for your location.
@@ -130,7 +131,7 @@ The image (~55 MB, Alpine):
 python3 -m unittest discover -s tests -v   # offline, standard library only
 ```
 
-The suite covers protobuf decoding, the intensity model, time zones of each agency, the detection policy (levels, escalation, cross-source dedupe, cancellations), WebSocket framing including hostile peers, the STA/LTA trigger and the HTTP guards. CI runs it on Python 3.8 to 3.13.
+The suite covers the Google MCS protocol (checkin layout, login, stream acks, idle replies, port fallback), protobuf decoding, the intensity model, time zones of each agency, the detection policy (levels, escalation, cross-source dedupe, cancellations), WebSocket framing including hostile peers, the STA/LTA trigger and the HTTP guards. CI runs it on Python 3.8 to 3.13.
 
 ---
 
@@ -150,7 +151,7 @@ The suite covers protobuf decoding, the intensity model, time zones of each agen
 | `--webhook-url` | `QUAKE_WEBHOOK_URL` | *None* | Destination webhook URL (e.g. Home Assistant), `http://` or `https://` |
 | `--webhook-secret` | `QUAKE_WEBHOOK_SECRET` | *None* | Optional secret key for HMAC-SHA256 payload signing (prefer the env var: CLI args are visible in `ps`) |
 | `--credentials-file` | `QUAKE_CREDENTIALS_FILE` | `~/.quake_device_credentials.json` | Where the anonymous device identity is stored (written with `0600` permissions) |
-| `--locale` / `--timezone` | `QUAKE_LOCALE` / `QUAKE_TIMEZONE` | `en_US` / `UTC` | Values sent once when registering the anonymous device |
+| `--locale` / `--timezone` | `QUAKE_LOCALE` / `QUAKE_TIMEZONE` | `en_US` / `UTC` | Accepted for compatibility; since v2.1 nothing is sent (Chrome's checkin doesn't include them) |
 | `--sources` | `QUAKE_SOURCES` | `mcs,emsc,wolfx` | Push sources to follow (`--no-emsc` drops `emsc`) |
 | `--notice-mmi` | `QUAKE_NOTICE_MMI` | `3.0` | Estimated intensity at your base station that triggers a `notice` |
 | `--alert-mmi` | `QUAKE_ALERT_MMI` | `5.0` | Estimated intensity that triggers an `alert` |

@@ -47,7 +47,7 @@ Quake MCS Listener keeps sockets open to the networks that actually issue warnin
 - **🐳 Runs 24/7:**
   - a ~55 MB Docker image with a healthcheck;
   - a hardened systemd unit for a Raspberry Pi.
-- **🧪 Tested:** 26 offline tests (including hostile WebSocket peers), with CI on Python 3.8–3.13.
+- **🧪 Tested:** 35 offline tests (including hostile WebSocket peers), with CI on Python 3.8–3.13.
 - **🌐 Web console:**
   - a live seismograph;
   - a packet console;
@@ -71,7 +71,7 @@ It speaks Google's push protocol fine, but we found that Google sends those aler
 
 For every quake the bridge estimates how hard it will shake at *your* house (Allen et al. 2012, the model behind USGS ShakeMap) and counts down to the S-wave. Home Assistant gets "🚨 Shaking in 18 s", not just "M6.1 somewhere".
 
-Zero dependencies, under 15 MB of RAM, Docker or systemd, 26 tests, MIT.
+Zero dependencies, under 15 MB of RAM, Docker or systemd, 35 tests, MIT.
 
 Built with Google Antigravity, Gemini 3.8 Flash and Claude Opus 5.5 (Claude Code).
 
