@@ -450,6 +450,20 @@
     .step p { margin-top: 8px; color: var(--muted); font-size: 14px; text-wrap: pretty; }
     .step .meta { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px; color: var(--dim); }
 
+    .sources { padding: 24px; margin-top: 14px; }
+    .sources::before { background: linear-gradient(135deg, rgba(34, 197, 94, 0.45), transparent 40%, transparent 70%, rgba(56, 189, 248, 0.25)); }
+    .src-head h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+    .src-head p { margin-top: 6px; color: var(--muted); font-size: 14px; max-width: 46rem; }
+    .src-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+    .src { position: relative; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, 0.015); min-width: 0; }
+    .src h4 { font-size: 14.5px; font-weight: 600; margin-top: 10px; }
+    .src p { font-size: 13px; color: var(--muted); margin-top: 4px; min-height: 3.6em; }
+    .src dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; }
+    .src dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); align-self: center; }
+    .src dd { color: var(--text); }
+    .src-k { display: inline-block; font-family: var(--mono); font-size: 10.5px; padding: 1px 7px; border-radius: 999px; border: 1px solid; }
+    .src-k.ok { color: var(--green); border-color: rgba(34, 197, 94, 0.35); background: var(--green-soft); }
+    .src-k.wait { color: var(--amber); border-color: rgba(234, 179, 8, 0.35); background: var(--amber-soft); }
     .source2 { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 28px; padding: 24px; margin-top: 14px; align-items: center; }
     .source2::before { background: linear-gradient(135deg, rgba(34, 197, 94, 0.45), transparent 40%, transparent 70%, rgba(56, 189, 248, 0.25)); }
     .source2 h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
@@ -492,6 +506,12 @@
     .alert strong { font-weight: 600; letter-spacing: -0.01em; }
     .alert .sub { font-family: var(--mono); font-size: 12px; color: #fecaca; }
     .alert .icon-btn { margin-left: auto; color: #fecaca; }
+    .alert-count { display: flex; align-items: center; gap: 8px; padding-right: 14px; margin-right: 2px; border-right: 1px solid rgba(254, 202, 202, 0.3); }
+    .alert-count[hidden] { display: none; }
+    .alert-count b { font-family: var(--mono); font-size: 30px; font-weight: 500; line-height: 1; min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
+    .alert-count span { font-family: var(--mono); font-size: 10px; line-height: 1.25; letter-spacing: 0.06em; text-transform: uppercase; color: #fecaca; }
+    .alert.is-now .alert-count b { animation: alarm-text 0.5s steps(2) infinite; }
+    @keyframes alarm-text { 50% { opacity: 0.35; } }
     .alert-bar { height: 2px; background: rgba(254, 202, 202, 0.15); }
     .alert-bar i { display: block; height: 100%; background: #fecaca; transform-origin: left; }
     .alert.is-on .alert-bar i { animation: drain var(--dur, 9s) linear forwards; }
@@ -521,6 +541,7 @@
       .steps { grid-template-columns: minmax(0, 1fr); }
       .status { grid-template-columns: minmax(0, 1fr); }
       .source2 { grid-template-columns: minmax(0, 1fr); }
+      .src-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 720px) {
       .wrap { padding: 0 16px; }
@@ -545,6 +566,7 @@
       .scope-foot > span:last-child { display: none; }
       footer .wrap { grid-template-columns: 1fr; }
       .status { padding: 22px; }
+      .src-grid { grid-template-columns: minmax(0, 1fr); }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
@@ -586,6 +608,7 @@
   <div class="alert" id="alert" role="alert" aria-live="assertive">
     <div class="wrap">
       <span class="alert-dot" aria-hidden="true"></span>
+      <div class="alert-count" id="alert-count" hidden><b id="alert-secs">0</b><span>s to<br>S-wave</span></div>
       <div>
         <strong id="alert-title">Drill</strong>
         <div class="sub" id="alert-sub"></div>
@@ -619,11 +642,11 @@
     <!-- Hero -->
     <section class="wrap hero">
       <div>
-        <p class="eyebrow"><span class="tag">MIT</span> Android Earthquake Alerts → Home Assistant</p>
+        <p class="eyebrow"><span class="tag">MIT</span> Early warnings → Home Assistant</p>
         <h1>Earthquake warnings, <span class="soft">straight into your smart home.</span></h1>
         <p class="lede">
-          One Python file that follows two push streams, Google's MCS channel (experimental) and EMSC's live global feed,
-          and turns quakes near you into a <b>Home Assistant webhook</b>. No emulator, no <span class="mono">pip install</span>, under 15&nbsp;MB of RAM.
+          One Python file that follows official early warnings, a worldwide quake feed and your own seismometer,
+          then tells <b>Home Assistant</b> how hard it will shake at your place and how many seconds you have. No <span class="mono">pip install</span>, under 15&nbsp;MB of RAM.
         </p>
 
         <div class="install card" id="install">
@@ -728,9 +751,9 @@
               <div class="sub" id="st-msgs">0 data messages</div>
             </div>
             <div class="stat">
-              <span class="k">EMSC events</span>
-              <div class="big" id="st-emsc">0</div>
-              <div class="sub" id="st-emsc-sub">global real-time feed</div>
+              <span class="k">Feeds live</span>
+              <div class="big" id="st-feeds">0<small>/4</small></div>
+              <div class="sub" id="st-feeds-sub">EEW · EMSC · Shake · MCS</div>
             </div>
           </div>
         </article>
@@ -806,7 +829,7 @@
   <span class="y-k">actions</span>:
     - <span class="y-k">action</span>: notify.notify
       <span class="y-k">data</span>:
-        <span class="y-k">title</span>: <span class="y-s">"Earthquake M{{ trigger.json.magnitude }}"</span>
+        <span class="y-k">title</span>: <span class="y-s">"Shaking in {{ trigger.json.s_wave_eta_s | int }} s"</span>
         <span class="y-k">message</span>: <span class="y-s">"Drop, cover, and hold on."</span></code></pre>
 <pre class="yaml" data-v="rest" hidden><code><span class="y-c"># configuration.yaml</span>
 <span class="y-k">rest</span>:
@@ -828,7 +851,7 @@
           <p class="kicker">02 / How it works</p>
           <h2>Push, not polling.</h2>
         </div>
-        <p>Most smart-home quake integrations ask a public API for news every 30 to 60 seconds. With seismic waves, that's often the whole warning window. This one keeps a socket open and gets told.</p>
+        <p>Most smart-home quake integrations ask a public API for news every 30 to 60 seconds. With seismic waves, that's often the whole warning window. This one keeps sockets open to the networks that issue warnings and gets told.</p>
       </div>
 
       <div class="card race reg" id="race" data-reveal>
@@ -844,7 +867,7 @@
           <div class="lane-res" style="color:var(--amber)">+22 s</div>
         </div>
         <div class="lane">
-          <div class="lane-name">MCS push<small>socket stays open</small></div>
+          <div class="lane-name">Push feed<small>socket stays open</small></div>
           <div class="track-x">
             <span class="tick" style="left:0%"></span><span class="tick" style="left:50%"></span><span class="tick" style="left:100%"></span>
             <span class="gap gap-green" style="left:13%;width:2.5%"></span>
@@ -854,42 +877,42 @@
           <div class="lane-res" style="color:var(--green)">on push</div>
         </div>
         <div class="race-axis"><span></span><span class="ax"><span>0 s</span><span>30 s</span><span>60 s</span></span><span></span></div>
-        <p class="race-note">Illustration with one quake at 8 s. A poller only finds out on its next request; a push lands as soon as Google sends it. For scale: P-waves travel at roughly 6 km/s, the damaging S-waves at about 3.5 km/s. The gap between them is the whole warning window.</p>
+        <p class="race-note">Illustration with one quake at 8 s. A poller only finds out on its next request; a push lands as soon as the network publishes it. For scale: P-waves travel at roughly 6 km/s, the damaging S-waves at about 3.5 km/s. The gap between them is the whole warning window.</p>
       </div>
 
       <div class="steps">
         <article class="card step" data-reveal>
-          <div class="step-n"><span>01</span><svg class="i"><use href="#i-phone"/></svg></div>
-          <h3>Phones feel it first</h3>
-          <p>Android's earthquake system uses the accelerometers in millions of phones as a crowdsourced seismometer network.</p>
-          <div class="meta">crowdsourced · near real time</div>
+          <div class="step-n"><span>01</span><svg class="i"><use href="#i-broadcast"/></svg></div>
+          <h3>Someone feels it first</h3>
+          <p>A national seismic network issues an early warning, a global centre publishes a report, or the sensor in your own house sees the P-wave.</p>
+          <div class="meta">EEW · EMSC · Raspberry Shake · MCS</div>
         </article>
         <article class="card step" data-reveal>
-          <div class="step-n"><span>02</span><svg class="i"><use href="#i-broadcast"/></svg></div>
-          <h3>Google pushes the alert</h3>
-          <p>Alerts go out over MCS, the binary protocol behind Android push. The bridge speaks it directly: TLS, login, heartbeats, protobuf.</p>
-          <div class="meta">mtalk.google.com:5228 · TLS · MCS v41</div>
+          <div class="step-n"><span>02</span><svg class="i"><use href="#i-gauge"/></svg></div>
+          <h3>The bridge does the math</h3>
+          <p>Distance to your station, expected intensity there (Allen et al., 2012) and a countdown to the S-wave. Duplicates across feeds collapse into one story.</p>
+          <div class="meta">MMI estimate · S-wave ETA · dedupe</div>
         </article>
         <article class="card step" data-reveal>
           <div class="step-n"><span>03</span><svg class="i"><use href="#i-home"/></svg></div>
           <h3>Your house reacts</h3>
-          <p>The bridge works out distance to your station and calls your webhook. Flash the lights, sound a siren, shut a valve: your automations decide.</p>
+          <p>"Shaking in 12 seconds." Flash the lights, sound a siren, shut a valve, open the garage: your automations decide what to do with the seconds.</p>
           <div class="meta">webhook · REST :8990 · HMAC-SHA256</div>
         </article>
       </div>
 
-      <div class="card source2" data-reveal>
-        <div>
-          <p class="kicker" style="color:var(--green)">Second source</p>
-          <h3>EMSC keeps the lights on.</h3>
-          <p>The European-Mediterranean Seismological Centre pushes every new or revised quake worldwide over a public WebSocket. The bridge follows it too and fires your webhook for events near your station. It arrives minutes after the shaking, so treat it as a fast report rather than a warning.</p>
+      <div class="card sources" data-reveal>
+        <div class="src-head">
+          <p class="kicker" style="color:var(--green)">Sources</p>
+          <h3>Four feeds, one policy.</h3>
+          <p>Each feed is honest about what it can do. The bridge notifies once per quake and only again if it gets worse.</p>
         </div>
-        <dl class="s2-facts">
-          <div><dt>Transport</dt><dd class="mono">wss://seismicportal.eu</dd></div>
-          <div><dt>Measured delay</dt><dd>~6–8 min</dd></div>
-          <div><dt>Coverage</dt><dd>worldwide</dd></div>
-          <div><dt>License</dt><dd>CC BY 4.0</dd></div>
-        </dl>
+        <div class="src-grid">
+          <div class="src"><span class="src-k ok">live</span><h4>Official early warnings</h4><p>JMA and CENC alerts relayed by Wolfx, revised as the quake grows.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Japan, mainland China</dd></dl></div>
+          <div class="src"><span class="src-k ok">ready</span><h4>Your own sensor</h4><p>A Raspberry Shake streams over UDP; an STA/LTA trigger catches the P-wave on site.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>anywhere</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>EMSC reports</h4><p>Every new or revised quake worldwide over a public WebSocket, CC BY 4.0.</p><dl><dt>Speed</dt><dd>~6–8 min</dd><dt>Where</dt><dd>worldwide</dd></dl></div>
+          <div class="src"><span class="src-k wait">experimental</span><h4>Google MCS</h4><p>Speaks Android's push protocol and decodes AEAS alerts, but has never received one.</p><dl><dt>Speed</dt><dd>—</dd><dt>Where</dt><dd>—</dd></dl></div>
+        </div>
       </div>
     </section>
 
@@ -898,18 +921,18 @@
       <div class="card status" data-reveal>
         <div>
           <p class="kicker" style="color:var(--amber)">03 / Where it stands</p>
-          <h2>Honest status: the Google path is a long shot.</h2>
-          <p>The MCS plumbing works: TLS, login, heartbeats and the alert decoder are verified. But Google targets earthquake alerts at phones running Play services, picked by the location they report. An anonymous client like this one isn't on that list, and in our tests it gets heartbeats and nothing else. That's why the bridge also follows EMSC, which does deliver, minutes after the fact. If you can prove the Google path delivers, we'd love to see the logs.</p>
+          <h2>Honest status: early warnings where they exist.</h2>
+          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you seconds anywhere, on site. EMSC covers the rest of the world, minutes after the fact. The Google path works up to the socket, but Google targets alerts at Play-services phones by location, and this client has never received one. Estimates are rough (about ±1 MMI) and this is no substitute for official alerts on your phone.</p>
           <div class="status-ctas">
             <a class="btn btn-primary" href="https://github.com/Juanipis/quake-alert-listener/issues/new" target="_blank" rel="noopener">Report what you see</a>
             <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Read the code</a>
           </div>
         </div>
         <ul class="checks">
-          <li><svg class="i ok"><use href="#i-check"/></svg>TLS + MCS login handshake<span>verified</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Heartbeat keepalive &amp; reconnect<span>verified</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Protobuf alert decoder<span>synthetic only</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>EMSC real-time feed<span>live</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Official EEW feed (JMA, CENC)<span>live</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>EMSC worldwide feed<span>live</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>26 tests</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Raspberry Shake STA/LTA trigger<span>synthetic</span></li>
           <li><svg class="i wait"><use href="#i-clock"/></svg>An AEAS alert reaching this client<span>never seen</span></li>
         </ul>
       </div>
@@ -925,7 +948,7 @@
         <a href="https://github.com/Juanipis/quake-alert-listener/issues" target="_blank" rel="noopener">Issues</a>
       </nav>
       <p class="legal">
-        Independent, non-profit open-source project for home automation and civil protection research. Not affiliated with, endorsed by or sponsored by Google LLC. Android and Google are trademarks of their respective owners. Built with Google Antigravity and Gemini 3.8 Flash. Map tiles © Esri and OpenStreetMap contributors. Earthquake reports © EMSC (seismicportal.eu), CC BY 4.0.
+        Independent, non-profit open-source project for home automation and civil protection research. Not affiliated with, endorsed by or sponsored by Google LLC. Android and Google are trademarks of their respective owners. Built with Google Antigravity, Gemini 3.8 Flash and Claude Opus 5.5. Map tiles © Esri and OpenStreetMap contributors. Earthquake reports © EMSC (seismicportal.eu), CC BY 4.0. Early warnings relayed by Wolfx (wolfx.jp) from JMA and CENC. Intensity model: Allen, Wald &amp; Worden (2012).
       </p>
     </div>
   </footer>
@@ -1101,15 +1124,15 @@
         for (let i = 0; i < n; i++) out[i] = L.buf[(L.head + i) % n];
         return out;
       }
-      kick(type, label) {
+      kick(type, label, sDelay) {
         const t = this.sampleN / this.speed;
         const P = { ping: [0.32, 0.06, 0.55, 7.5], data: [0.6, 0.08, 1.0, 6.5], quake: [0.85, 0.1, 1.8, 6] }[type];
         const S = { ping: [0.22, 0.1, 0.8, 3.4], data: [0.75, 0.14, 1.6, 3.0], quake: [1.15, 0.2, 3.4, 2.6] }[type];
-        const delay = { ping: 0.35, data: 0.8, quake: 1.2 }[type];
+        const delay = sDelay != null ? Math.max(0.3, sDelay) : { ping: 0.35, data: 0.8, quake: 1.2 }[type];
         this.kicks.push({ lane: 0, t0: t, amp: P[0], attack: P[1], decay: P[2], freq: P[3], ph: Math.random() * 6 });
         this.kicks.push({ lane: 1, t0: t + delay, amp: S[0], attack: S[1], decay: S[2], freq: S[3], ph: Math.random() * 6 });
         this.markers.push({ at: this.sampleN, label, color: type === 'quake' ? '#ef4444' : type === 'data' ? '#22c55e' : '#38bdf8' });
-        if (type === 'quake') this.alertUntil = performance.now() + 9000;
+        if (type === 'quake') this.alertUntil = performance.now() + (delay + 8) * 1000;
       }
       sample(li, t) {
         const L = this.lanes[li];
@@ -1253,8 +1276,8 @@
 
     const scope = new Seismograph($('#scope'));
     let eventCount = 0;
-    function pulse(type, label) {
-      scope.kick(type, label);
+    function pulse(type, label, sDelay) {
+      scope.kick(type, label, sDelay);
       eventCount++;
       $('#hud-events').textContent = `${eventCount} event${eventCount === 1 ? '' : 's'}`;
       $('#hud-last').textContent = `${label.toLowerCase()} ${clock()}`;
@@ -1270,9 +1293,13 @@
 
     function classify(msg) {
       if (/\berror\b|exception|^warning|warning:|fail|reject|disallow|denied|refused|silent for/i.test(msg)) return ['warn', 'Error'];
-      if (/EARTHQUAKE|alert detected/i.test(msg)) return ['alert', 'QuakeAlert'];
+      if (/EARTHQUAKE (ALERT|NOTICE|CANCEL)|alert detected/i.test(msg)) return ['alert', /NOTICE/.test(msg) ? 'Notice' : /CANCEL/.test(msg) ? 'Cancel' : 'QuakeAlert'];
       if (/drill/i.test(msg)) return ['alert', 'Drill'];
       if (/^EMSC (create|update|insert)/i.test(msg)) return ['data', 'EMSC'];
+      if (/^(JMA|CENC|Sichuan|Fujian|Chongqing) EEW/.test(msg)) return ['data', 'EEW'];
+      if (/^Raspberry Shake: P-wave trigger/.test(msg)) return ['alert', 'Trigger'];
+      if (/^Raspberry Shake/.test(msg)) return ['sys', 'Shake'];
+      if (/^Connected to Wolfx|^Wolfx/.test(msg)) return ['sys', 'EEW'];
       if (/^EMSC|emsc/i.test(msg)) return ['sys', 'EMSC'];
       if (/interval|starting|telemetry server|stopp/i.test(msg)) return ['sys', 'Log'];
       if (/iq ?stanza/i.test(msg)) return ['iq', 'IqStanza'];
@@ -1354,6 +1381,8 @@
         toast('Bridge linked — showing live data');
       } else {
         $('#st-hwid').textContent = '';
+        $('#st-feeds').innerHTML = '0<small>/4</small>';
+        $('#st-feeds-sub').textContent = 'run the bridge to go live';
         addLine('Bridge went quiet. Back to simulated traffic.', { kind: 'warn', tag: 'Bridge' });
       }
     }
@@ -1391,23 +1420,30 @@
         msgs: g.messages_received | 0,
         det: d.total_detections | 0,
         emsc: (d.emsc && d.emsc.events_received) | 0,
+        eew: (d.sources && d.sources.wolfx && d.sources.wolfx.events_received) | 0,
       };
       if (g.latency_ms != null && g.latency_ms !== state.latHist[state.latHist.length - 1]) setLatency(g.latency_ms);
       if (state.prev) {
         if (cur.pings > state.prev.pings) pulse('ping', 'HEARTBEAT');
         if (cur.msgs > state.prev.msgs) pulse('data', 'DATA');
         if (cur.emsc > state.prev.emsc) pulse('data', 'EMSC');
+        if (cur.eew > state.prev.eew) pulse('data', 'EEW');
         if (cur.det > state.prev.det && Date.now() > state.suppressQuakeUntil) onQuake(d.last_quake || {});
       }
       state.prev = cur;
       setCount('#st-pings', cur.pings);
       $('#st-msgs').textContent = `${cur.msgs} data message${cur.msgs === 1 ? '' : 's'}`;
       if (g.android_id) $('#st-hwid').textContent = `device ${maskId(g.android_id)}`;
-      if (d.emsc) {
-        setCount('#st-emsc', cur.emsc);
-        $('#st-emsc-sub').textContent = !d.emsc.enabled ? 'disabled (--no-emsc)'
-          : d.emsc.connected ? 'connected · worldwide' : 'reconnecting…';
-      }
+      const src = d.sources || (d.emsc ? { emsc: d.emsc } : {});
+      const names = { wolfx: 'EEW', emsc: 'EMSC', shake: 'Shake' };
+      const on = [], off = [];
+      Object.keys(names).forEach((k) => {
+        if (!src[k] || !src[k].enabled) return;
+        (src[k].connected ? on : off).push(names[k]);
+      });
+      (g.connected ? on : off).push('MCS');
+      $('#st-feeds').innerHTML = `${on.length}<small>/${on.length + off.length}</small>`;
+      $('#st-feeds-sub').textContent = on.join(' · ') + (off.length ? ` · ${off.join(', ')} down` : '');
       if (g.last_packet_ts) $('#hud-last').textContent = new Date(g.last_packet_ts * 1000).toTimeString().slice(0, 8);
 
       const logs = Array.isArray(d.recent_logs) ? d.recent_logs : [];
@@ -1436,7 +1472,7 @@
               if (state.linked) return;
               const m = (1.5 + Math.random() * 2.5).toFixed(1);
               addLine(`EMSC update: M${m} Test Region, depth ${Math.round(5 + Math.random() * 30)} km (simulated)`);
-              setCount('#st-emsc', ++state.simEmsc);
+              ++state.simEmsc;
               pulse('data', 'EMSC');
             }, 2600);
           }
@@ -1490,12 +1526,40 @@
       speechSynthesis.speak(u);
     }
 
+    /* ---------------- Local impact (same model as the bridge) ---------------- */
+    // Allen, Wald & Worden (2012), hypocentral form; see docs/HOW_IT_WORKS.md
+    function estimateMMI(M, R) {
+      const r = Math.max(R, 0.1), rm = -0.209 + 2.042 * Math.exp(M - 5);
+      let mmi = 2.085 + 1.428 * M - 1.402 * Math.log(Math.sqrt(r * r + rm * rm));
+      if (r > 50) mmi += 0.078 * Math.log(r / 50);
+      return Math.max(1, Math.min(mmi, 12));
+    }
+    const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X+'];
+    const roman = (mmi) => ROMAN[Math.max(1, Math.min(Math.round(mmi), 10)) - 1];
+
     /* ---------------- Alert overlay ---------------- */
-    let alertTimer;
-    function showAlert(title, sub, seconds = 9) {
+    let alertTimer, countTimer;
+    function showAlert(title, sub, seconds = 9, sArrivalMs = null) {
       const a = $('#alert');
       $('#alert-title').textContent = title;
       $('#alert-sub').textContent = sub;
+      clearInterval(countTimer);
+      a.classList.remove('is-now');
+      const count = $('#alert-count');
+      const left = sArrivalMs ? (sArrivalMs - Date.now()) / 1000 : 0;
+      if (left > 0.5) {
+        seconds = Math.max(seconds, left + 6);
+        count.hidden = false;
+        const tick = () => {
+          const s = Math.ceil((sArrivalMs - Date.now()) / 1000);
+          $('#alert-secs').textContent = s > 0 ? s : 'NOW';
+          if (s <= 0) { a.classList.add('is-now'); clearInterval(countTimer); }
+        };
+        tick();
+        countTimer = setInterval(tick, 200);
+      } else {
+        count.hidden = true;
+      }
       a.style.setProperty('--dur', seconds + 's');
       a.classList.remove('is-on'); void a.offsetWidth; a.classList.add('is-on');
       document.body.classList.add('is-alerting');
@@ -1503,24 +1567,35 @@
       alertTimer = setTimeout(hideAlert, seconds * 1000);
     }
     function hideAlert() {
-      $('#alert').classList.remove('is-on');
+      clearInterval(countTimer);
+      $('#alert').classList.remove('is-on', 'is-now');
       document.body.classList.remove('is-alerting');
     }
     $('#alert-close').addEventListener('click', hideAlert);
 
     function onQuake(q) {
       const mag = q.magnitude ?? q.magnitud ?? '?';
-      const drill = /drill|simulacro/i.test(q.level || q.nivel || '');
-      const report = /EMSC/i.test(q.source || '');
-      const loud = drill || (q.level || q.nivel) === 'alert' || (q.level || q.nivel) === 'alerta';
-      const title = drill ? `Drill · M${mag}` : report ? `Earthquake report · M${mag}` : `Earthquake alert · M${mag}`;
-      showAlert(title, q.place || q.lugar || 'Received from the bridge', loud ? 9 : 6);
+      const level = q.level || q.nivel || '';
+      const status = q.status || '';
+      const drill = /drill|simulacro/i.test(level);
+      const cancel = /cancel/i.test(level);
+      const loud = drill || level === 'alert' || level === 'alerta';
+      const sAt = q.s_wave_arrival_ts ? q.s_wave_arrival_ts * 1000 : null;
+      const eta = sAt ? (sAt - Date.now()) / 1000 : null;
+      const title = drill ? `Drill · M${mag}`
+        : cancel ? 'Early warning cancelled'
+        : status === 'early warning' ? `Early warning · M${mag}`
+        : status === 'rapid report' ? `Earthquake report · M${mag}`
+        : status === 'on-site trigger' ? 'Sensor trigger at your station'
+        : `Earthquake alert · M${mag}`;
+      showAlert(title, q.place || q.lugar || 'Received from the bridge', loud ? 9 : 6, cancel ? null : sAt);
       if (loud) {
         siren();
-        speak(drill ? `This is a drill. Magnitude ${mag}.` : `Earthquake ${report ? 'report' : 'alert'}. Magnitude ${mag}.`);
+        speak(eta && eta > 2 ? `Earthquake. Shaking in ${Math.round(eta)} seconds.`
+          : drill ? `This is a drill. Magnitude ${mag}.` : `Earthquake alert. Magnitude ${mag}.`);
       }
-      pulse('quake', drill ? 'DRILL' : report ? 'EMSC' : 'QUAKE');
-      if (q.lat != null && q.lon != null) ripple(q.lat, q.lon);
+      if (!cancel) pulse('quake', drill ? 'DRILL' : status === 'early warning' ? 'EEW' : status === 'rapid report' ? 'EMSC' : 'QUAKE', eta && eta > 0 ? eta : null);
+      if (q.lat != null && q.lon != null && !cancel) ripple(q.lat, q.lon);
     }
 
     /* ---------------- Controls ---------------- */
@@ -1579,12 +1654,16 @@
         btn.classList.remove('is-armed');
         keyFeedback(btn, 'drill running', 9000);
         const name = state.loc.name || DEFAULT_LOC.name;
-        state.suppressQuakeUntil = Date.now() + 8000;
-        showAlert('Drill · simulated M5.5', `38 km from ${name} · depth 18 km · this is not a real event`);
+        // Simulated M5.5, 38 km away, 18 km deep, warning issued 3 s after origin.
+        const hypo = Math.hypot(38, 18), mmi = estimateMMI(5.5, hypo);
+        const sAt = Date.now() + (hypo / 3.5 - 3) * 1000;
+        const eta = Math.round((sAt - Date.now()) / 1000);
+        state.suppressQuakeUntil = Date.now() + 15000;
+        showAlert('Drill · simulated M5.5', `38 km from ${name} · est. MMI ${roman(mmi)} · this is not a real event`, 9, sAt);
         siren();
-        setTimeout(() => speak(`This is a drill. Simulated earthquake, magnitude 5.5, 38 kilometres from ${name}.`), 1900);
-        pulse('quake', 'DRILL');
-        addLine(`Drill: simulated M5.5, 38 km from ${name}`, { kind: 'alert', tag: 'Drill' });
+        setTimeout(() => speak(`This is a drill. Shaking in ${Math.max(1, eta - 2)} seconds.`), 1900);
+        pulse('quake', 'DRILL', (sAt - Date.now()) / 1000);
+        addLine(`Drill: simulated M5.5, 38 km from ${name}, est. MMI ${roman(mmi)}, S-wave in ${eta} s`, { kind: 'alert', tag: 'Drill' });
         ripple(state.loc.lat + 0.22, state.loc.lon + 0.18);
         if (state.linked) {
           try {
