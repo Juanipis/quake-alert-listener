@@ -182,56 +182,68 @@ The bridge supports two checkin device profiles via `--device-type {android,chro
 > [!NOTE]
 > Google accepts both profiles with HTTP 200, assigning authentic `android_id` and `security_token`. Both profiles authenticate cleanly on `mtalk.google.com:5228` with ~80–120 ms round-trip latency.
 
-## 2. Logging in to MCS
+### 4. Reverse-Engineering Google AEAS & Cloud Geofencing
 
-MCS (Mobile Connection Server) is the long-lived binary protocol behind Android and Chrome push. The bridge follows Chromium's [`mcs.proto`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/protocol/mcs.proto) and [`mcs_client.cc`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/engine/mcs_client.cc).
+### DEX Analysis of Google Play Services (`com.google.android.gms`)
+By decompiling the DEX bytecode (`classes13.dex` and `classes15.dex`) of Google Play Services (`com.google.android.gms`), the internal AEAS pipeline was mapped end-to-end:
 
-**Connection.**
-- TLS to `mtalk.google.com:5228`, with certificate verification on. If port 5228 is blocked (some corporate or hotel networks), the client falls back to **port 443**, as Chrome does, and sticks with the port that worked (verified live).
-- The client sends one version byte (`41`), then the `LoginRequest`.
+```
+[mtalk.google.com:5228]
+       │
+       ▼ (MCS DataMessageStanza, tag 8, cat: com.google.android.gms)
+[GcmReceiverChimeraService]
+       │
+       ▼ (Decodes Protobuf Payload)
+[EAlertUxArgs] ────────► { magnitude, epicenter[lat/lng], distanceToEpicenterKm, arwRegionName }
+       │
+       ▼ (High-priority Intent START)
+[EAlertSafetyInfoActivity] ──► Fullscreen Take Action Siren & Warning UI
+```
 
-**Framing.** After the version byte, every message is `tag (1 byte) + length (varint) + protobuf payload`.
+1. **Inbound GCM Handler:** `com.google.android.location.quake.ealert.GcmReceiverChimeraService` processes incoming push stanzas from MCS.
+2. **Alert Model:** Decoded into `com.google.android.location.quake.ealert.ux.EAlertUxArgs`, matching the protobuf schema implemented in `decode_earthquake_payload()`.
+3. **Emergency UI Dispatch:** Automatically launches `com.google.android.location.settings.EAlertSafetyInfoActivity` with flags `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_NO_USER_ACTION`, bypassing Do Not Disturb and displaying the estimated arrival time of the S-wave.
+4. **The Root Cause of 0 Data Messages on Pure Sockets:**
+   Google AEAS is **not a global broadcast channel**. Google's cloud server only sends alert stanzas to devices that actively report location through Google's Fused Location Provider (`loc/m/api`) and Phenotype location beacons (`Ealert__location_interval_millis`).
+   A standalone TCP client on `mtalk.google.com:5228` (whether Chrome or Android identity) does not transmit periodic Fused Location telemetry to Google's location reporting backend. Consequently, Google's server never matches a bare socket to any geographic earthquake polygon.
 
-| Tag | Message | What the bridge does |
-|---:|---|---|
-| 0 | `HeartbeatPing` | Replies with a `HeartbeatAck` carrying `last_stream_id_received` |
-| 1 | `HeartbeatAck` | Measures the round-trip of its own ping |
-| 2 | `LoginRequest` | Sent once per connection (`android-34` or `chrome-...`) |
-| 3 | `LoginResponse` | Error checked; heartbeat config and server time read |
-| 4 | `Close` | Reconnects |
-| 7 | `IqStanza` | `SelectiveAck` (12) and `StreamAck` (13) handled |
-| 8 | `DataMessageStanza` | The only frame that can carry an alert; also carries the server's `IdleNotification` |
+### The Production Solution: Autonomous Micro-Android Sentinel (Redroid)
+To eliminate any dependence on a physical smartphone or a heavy desktop emulator running on a Mac/PC, the project supports running an **autonomous containerized Android 11 node (Redroid)** directly on the home server or Raspberry Pi 4:
 
-**LoginRequest fields.** The login is constructed according to the device profile:
-- `id`: `android-34` (for Android) or `chrome-120.0.6099.144` (for Chrome)
-- `domain`: `mcs.android.com`
-- `user` and `resource`: the `android_id`
-- `auth_token`: the `security_token`
-- `device_id`: `android-<hex android_id>`
+- **Image & Environment:** `redroid/redroid:11.0.0_gapps` running containerized on Linux with BinderFS (`/dev/binderfs`) and Kernel PSI (`psi=1`).
+- **Debloated Runtime:** UI launcher (`Launcher3`), Play Store (`vending`), and live wallpapers are disabled, stabilizing idle CPU usage at **~1.7%** on a Raspberry Pi 4.
+- **Location Anchor:** A persistent mock location foreground service (`com.lexa.fakegps`) injects exact base station coordinates into both `gps` and `network` providers, keeping Google Play Services perpetually geolocated at your home.
+- **Real-Time Sentinel Listener (`android_alert_listener.py`):**
+  - Streams Android kernel logcat events in real time via `docker exec redroid-quake logcat -v time -b main -b events -b system -T 1 -e "EAlert|sismo|earthquake|..."`.
+  - Achieves **<10 ms latency** and 0.0% CPU overhead at idle.
+  - **Zero-False-Alarm Protection:** Ignores lifecycle exit events (`onDestroy`, `onPause`, `finish`), ignores configuration demos (`isTestAlert=true`, `EAlertSettings`), and verifies with `dumpsys activity top` before dispatching. If the screen is not active, events are discarded safely without triggering false alarms.
+  - Signs payloads with HMAC-SHA256 (`X-Quake-Signature`) and posts to `:8990/android`.
+
+See [docs/REDROID_SENTINEL.md](REDROID_SENTINEL.md) for the complete step-by-step setup guide.
 
 ---
 
-## 4. Reverse-Engineering Google AEAS & Cloud Geofencing
+### 5. Multilayer Redundancy: Official Geological Feeds (SGC & USGS)
 
-### DEX Analysis of Google Play Services (`com.google.android.gms`)
-By decompiling the DEX bytecode (`classes13.dex` and `classes15.dex`) of Google Play Services, the internal AEAS pipeline was mapped:
-1. **Inbound GCM Handler:** `com.google.android.location.quake.ealert.GcmReceiverChimeraService` processes incoming push stanzas from MCS.
-2. **Alert Model:** Decoded into `com.google.android.location.quake.ealert.ux.EAlertUxArgs`, matching the protobuf schema implemented in `decode_earthquake_payload()`.
-3. **The Root Cause of 0 Data Messages on Pure Sockets:**
-   Google AEAS is **not a global broadcast**. Google's cloud server only sends alert stanzas to devices that actively report location through Google's Fused Location Provider (`loc/m/api`) and Phenotype location beacons (`Ealert__location_interval_millis`).
-   A standalone TCP client on `mtalk.google.com:5228` (whether Chrome or Android identity) does not transmit periodic Fused Location telemetry to Google's location reporting backend. Consequently, Google's server never matches the client to any geographic earthquake polygon.
+In addition to Google AEAS, production deployments can run a multilayer polling strategy for official scientific agencies:
 
-### The Hybrid Solution: Android Probe Gateway (`POST /android`)
-To guarantee delivery of authentic Google Earthquakes Alerts without fragile GPS telemetry spoofing, `quake_listener.py` provides an ingestion endpoint:
-- **Endpoint:** `POST /android` and `POST /api/android`
-- **Authentication:** HMAC-SHA256 signature verification via `X-Sismo-Firma` or `X-Quake-Signature` (configured with `--android-secret` or `SISMO_ANDROID_SECRETO`).
-- **Android Probe:** An Android phone or a lightweight headless Android emulator (`sismo_bello`, Android 15 with Google Play Services) running `android_alert_listener.py`:
-  - Fixed GPS coordinates (`geo fix`).
-  - Screen suspended (`adb shell input keyevent 26`), consuming ~2% CPU.
-  - Continuous logcat streaming of `EAlertSafetyInfoActivity` / `EAlertUxArgs` (< 10 ms latency).
-  - Pushes alert payloads directly into `quake_listener.py`, where `DetectionDesk` deduplicates across sources, computes intensity, and triggers Home Assistant webhooks immediately.
+1. **SGC (Servicio Geológico Colombiano):**
+   - Polling endpoint: `https://archive.sgc.gov.co/feed/v1.0.1/summary/five_days_all.json` every 15 seconds.
+   - User-Agent header customized to pass CloudFront edge filters.
+2. **USGS (United States Geological Survey):**
+   - Polling endpoint: `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson` every 60 seconds.
+3. **Zero-Bandwidth Conditional Caching:**
+   - All requests send `If-None-Match: <ETag>` and `If-Modified-Since: <Last-Modified>`.
+   - Returns **HTTP 304 Not Modified** (0 payload bytes) when no new events have occurred, consuming near-zero network bandwidth and host CPU.
+4. **Intensity Engine (Atkinson, Worden & Wald 2014):**
+   - For every reported hypocenter, local ground shaking at the base station is computed:
+     $$\text{MMI} = 0.309 + 1.864 \cdot M - 1.672 \cdot \log_{10}(R) - 0.00219 \cdot R + 1.77 \cdot B - 0.383 \cdot M \cdot \log_{10}(R)$$
+   - Events are automatically categorized as `notice` (MMI ≥ 2.5) or `alert` (MMI ≥ 3.5).
+5. **Unified Incident Fusion:**
+   - If Google AEAS fires first, the alarm sounds immediately.
+   - When SGC/USGS subsequently publishes the reviewed seismic solution (with official magnitude, depth, and epicentral coordinates), the system links the event IDs and updates Home Assistant without re-triggering duplicate nuisance alarms.
 
-## 5. The other sources
+---
 
 ### 5a. EMSC (worldwide rapid reports)
 

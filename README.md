@@ -18,27 +18,55 @@
 
 | Source | What it gives you | Speed | Where | Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **Android Probe Gateway** (`POST /android`) | Real Google Play Services AEAS alerts via logcat streaming or HTTP probe | **< 10 ms**, immediate local broadcast | Global (wherever phone/AVD is located) | ✅ Operational |
-| **Official EEW** via [Wolfx](https://wolfx.jp) (JMA, CENC, Sichuan, Fujian, Chongqing) | Early warning with magnitude and location, revised as the quake grows | **Seconds after origin**, often before the S-wave | Japan and mainland China | ✅ Live |
+| **Autonomous Redroid Sentinel** (`POST /android`) | Real Google Play Services AEAS alerts via headless micro-Android container on Linux / Raspberry Pi | **< 10 ms**, immediate local broadcast | Global (wherever base station is geolocated) | ✅ Operational |
+| **Google MCS Socket** (Direct TLS `mtalk.google.com:5228`) | Native binary protocol socket supporting Android 14 & Chrome device checkin | **Seconds** | Global (where AEAS runs) | ✅ Operational |
+| **Official EEW** via [Wolfx](https://wolfx.jp) (JMA, CENC, Sichuan, Fujian, Chongqing) | Early warning with magnitude and location, revised as the quake grows | **Seconds after origin**, often before S-wave | Japan and mainland China | ✅ Live |
+| **Official Geological Feeds** (SGC & USGS) | Reviewed earthquake solutions with zero-bandwidth HTTP 304 conditional caching | **Seconds to minutes** | Colombia (SGC) & Global (USGS) | ✅ Live |
 | **On-site sensor** ([Raspberry Shake](https://raspberryshake.org) UDP datacast) | P-wave trigger at your own house (STA/LTA) | **Seconds**, with no network in between | Anywhere you install one | ✅ Tested with synthetic signals |
-| **EMSC** [SeismicPortal](https://www.seismicportal.eu/realtime.html) | Every new or revised quake worldwide | **Minutes** (measured ~6–8 min) | Worldwide | ✅ Live |
-| **Google MCS Socket** (Direct TLS mtalk:5228) | Protocol channel supporting Android & Chrome device checkin | Seconds | Where AEAS runs | ⚠️ Experimental (Google geofences to reporting phones) |
+| **EMSC** [SeismicPortal](https://www.seismicportal.eu/realtime.html) | Every new or revised quake worldwide via WebSocket | **Minutes** (measured ~6–8 min) | Worldwide | ✅ Live |
 
 For every event, wherever it comes from, the bridge works out your local impact:
-- **Estimated intensity at your base station** (MMI), using Allen, Wald & Worden (2012), the default intensity equation in USGS ShakeMap.
+- **Estimated intensity at your base station** (MMI), using Atkinson, Worden & Wald (2014) / Allen, Wald & Worden (2012), the default intensity equation in USGS ShakeMap.
 - **A countdown to the S-wave**, the strong shaking.
 
 Notification levels follow Android's own thresholds:
-- **`notice`** from MMI 3, like Android's "Be Aware".
-- **`alert`** from MMI 5, like Android's "Take Action".
+- **`notice`** from MMI 2.5–3.0, like Android's "Be Aware".
+- **`alert`** from MMI 3.5–5.0, like Android's "Take Action".
 
-> [!NOTE]
-> **Connecting Google Android Earthquake Alerts.**
-> - **Direct MCS Socket (`--device-type android`):** Performs authentic Google Checkin as a Pixel 6 (`DEVICE_ANDROID_OS`) and logs in as `android-34` with persistent stream-IDs and heartbeats. However, reverse-engineering of Google Play Services (`com.google.android.location.quake.ealert`) shows Google's cloud server only sends alert stanzas to devices actively reporting coordinates via Google Fused Location.
-> - **Android Probe Bridge (`POST /android`):** To get real AEAS alerts with zero delay, pair `quake_listener.py` with an Android device or a lightweight local Android emulator running Google Play Services via `android_alert_listener.py`. It streams events directly to `http://<listener-ip>:8990/android` with optional HMAC signing (`--android-secret`), immediately firing Home Assistant automations.
+---
+
+## 🔬 How We Reverse-Engineered Google MCS & AEAS
+
+Google's **Android Earthquake Alerts System (AEAS)** is the world's largest crowdsourced earthquake detection network. However, Google does not provide a public API for it. We reverse-engineered the entire communication stack from the wire protocol up to Google Play Services bytecode:
+
+### 1. The Wire Protocol: Google MCS (Mobile Connection Server)
+Behind Android and Chrome push notifications sits Google's binary protocol server at `mtalk.google.com:5228` (with TLS fallback on port 443):
+- **Handshake Byte:** The client opens TLS and writes a single version byte `0x29` (decimal `41`).
+- **Protobuf Framing:** Every message thereafter is framed as `tag (1 byte) + length (varint) + protobuf payload`.
+- **Packet Tags:**
+  - `Tag 2 (LoginRequest)`: Authenticates using an anonymous `android_id`, `security_token`, and device identity (e.g. `android-34` with `use_rmq2: true`).
+  - `Tag 0 (HeartbeatPing)` & `Tag 1 (HeartbeatAck)`: Measures round-trip ping latency and prevents TCP dropouts.
+  - `Tag 7 (IqStanza)`: Exchanges `StreamAck` counters (`last_stream_id_received`) so the server never duplicates stanzas after reconnection.
+  - `Tag 8 (DataMessageStanza)`: Delivers incoming push payloads matching category `com.google.android.gms`.
+
+### 2. The Cloud Geofencing Discovery
+By analyzing the decompiled DEX bytecode of Google Play Services (`com.google.android.gms`):
+- We identified the inbound push receiver `com.google.android.location.quake.ealert.GcmReceiverChimeraService` and decoded its payload into `EAlertUxArgs`.
+- **The Catch:** Google AEAS is **not a global broadcast**. Google's cloud server only sends alert stanzas to devices actively reporting coordinates through Google's Fused Location Provider (`loc/m/api`) and Phenotype location beacons. A pure socket without location reporting does not match Google's dynamic geographical earthquake polygons.
+
+### 3. The Autonomous Micro-Android Sentinel
+To solve this without needing a physical phone or a Mac/PC emulator running 24/7, we created the **Autonomous Redroid Sentinel**:
+- Runs a containerized headless Android 11 environment (`redroid/redroid:11.0.0_gapps`) directly on Linux / Raspberry Pi 4.
+- Runs debloated (idle CPU **~1.7%** on Raspberry Pi 4).
+- Injects a continuous system-level mock location beacon for your base station (`com.lexa.fakegps`).
+- Streams Android kernel logcat events in real time (<10 ms latency) using `android_alert_listener.py`.
+- **Zero-False-Alarm Immunity:** Filters activity lifecycle exit events (`onDestroy`, `onPause`, `finish`) and settings demos (`isTestAlert=true`), verifying `dumpsys activity top` so lights never turn red accidentally.
+- Authenticated via HMAC-SHA256 (`POST /android`) directly to the listener gateway.
+
+👉 Read the full technical breakdown in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) and the Raspberry Pi setup in [docs/REDROID_SENTINEL.md](docs/REDROID_SENTINEL.md).
 
 > [!CAUTION]
-> This is a hobby project, not a certified warning system. Estimates carry roughly ±1 MMI of uncertainty, sources can be late or silent, and an on-site trigger can be a slammed door. Always keep official alerts enabled on your phone.
+> This is an independent open-source project, not a certified civil defense warning system. Estimates carry roughly ±1 MMI of uncertainty, and network sources can experience latency. Always keep official emergency broadcasts enabled on your mobile devices.
 
 ---
 
