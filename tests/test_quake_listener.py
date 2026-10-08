@@ -379,8 +379,16 @@ class GoogleMCS(unittest.TestCase):
         build = ql.parse_protobuf(checkin[1][0][1])                       # field 1: AndroidBuildProto
         self.assertIn(b"oriole", build[2][0][1])                          # product: oriole
         self.assertEqual(build[11][0][1], b"Pixel 6")                     # model: Pixel 6
-        self.assertIn(6, req)                                             # locale es_CO
-        self.assertIn(12, req)                                            # timezone America/Bogota
+        self.assertEqual(req[6][0][1], b"en_US")                          # --locale (default)
+        self.assertEqual(req[12][0][1], b"UTC")                           # --timezone (default)
+        self.assertNotIn(6, checkin)                                      # no fixed carrier code
+        old = (ql.CHECKIN_LOCALE, ql.CHECKIN_TIMEZONE)
+        ql.CHECKIN_LOCALE, ql.CHECKIN_TIMEZONE = "es_CO", "America/Bogota"
+        try:
+            req = ql.parse_protobuf(ql.build_checkin_request(device_type="android"))
+            self.assertEqual((req[6][0][1], req[12][0][1]), (b"es_CO", b"America/Bogota"))
+        finally:
+            ql.CHECKIN_LOCALE, ql.CHECKIN_TIMEZONE = old
 
     def test_checkin_due(self):
         now = 1_000_000_000

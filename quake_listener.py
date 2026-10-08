@@ -357,6 +357,11 @@ def _chrome_platform():
     return 3       # PLATFORM_LINUX
 
 
+# Locale and time zone announced by the Android profile (--locale / --timezone).
+CHECKIN_LOCALE = "en_US"
+CHECKIN_TIMEZONE = "UTC"
+
+
 def build_checkin_request(creds=None, device_type=None):
     """AndroidCheckinRequest supporting Chrome GCM or Android GMS profile.
 
@@ -385,9 +390,6 @@ def build_checkin_request(creds=None, device_type=None):
         checkin = (
             field_bytes(1, build_proto) +
             field_varint(2, 0) +
-            field_str(6, "732101") +
-            field_str(7, "732101") +
-            field_str(8, "mobile-notroaming") +
             field_varint(9, 0) +
             field_varint(12, DEVICE_ANDROID_OS)
         )
@@ -396,8 +398,8 @@ def build_checkin_request(creds=None, device_type=None):
             body += field_str(3, creds["digest"])
         body += (
             field_bytes(4, checkin) +
-            field_str(6, (creds.get("locale") if creds else None) or "es_CO") +
-            field_str(12, (creds.get("timezone") if creds else None) or "America/Bogota") +
+            field_str(6, CHECKIN_LOCALE) +
+            field_str(12, CHECKIN_TIMEZONE) +
             field_fixed64(13, token) +
             field_varint(14, 3) +
             field_varint(22, 0)
@@ -3271,9 +3273,10 @@ def build_parser():
 
 
 def main():
-    global CREDENTIALS_FILE, ALLOWED_ORIGINS, ALLOWED_HOSTS, DEBUG_FRAMES
+    global CREDENTIALS_FILE, ALLOWED_ORIGINS, ALLOWED_HOSTS, DEBUG_FRAMES, CHECKIN_LOCALE, CHECKIN_TIMEZONE
     args = build_parser().parse_args()
     DEBUG_FRAMES = args.debug_frames
+    CHECKIN_LOCALE, CHECKIN_TIMEZONE = args.locale, args.timezone
     if args.no_emsc:
         args.sources.discard("emsc")
     if args.alert_mmi < args.notice_mmi:
