@@ -6,30 +6,33 @@
 type: vertical-stack
 cards:
   - type: heading
-    heading: Earthquake Monitor (AEAS mtalk:5228)
+    heading: Earthquake Monitor
     icon: mdi:earthquake
 
   - type: entities
-    title: TLS Link Telemetry
+    title: Bridge
     entities:
-      - entity: binary_sensor.quake_listener_mcs_link
-        name: TLS Link Status
-      - entity: sensor.quake_listener_status
-        name: MCS Protocol State
-      - entity: sensor.quake_listener_latency
-        name: Round-Trip Latency
-      - entity: sensor.quake_listener_pings
-        name: Packets Received
-      - entity: sensor.quake_listener_hardware_id
-        name: Anonymous Hardware ID
+      - entity: binary_sensor.quake_listener_online
+        name: Bridge online
+      - entity: sensor.quake_listener_feeds_online
+        name: Feeds connected
+      - entity: sensor.quake_listener_location
+        name: Base station
+      - entity: sensor.quake_listener_last_quake
+        name: Last notified quake
 
   - type: entities
-    title: Station Location & Recent Events
+    title: Google MCS (experimental research)
+    state_color: true
     entities:
-      - entity: sensor.quake_listener_location
-        name: Monitored Station
-      - entity: sensor.quake_listener_last_quake
-        name: Last Detected Event
+      - entity: binary_sensor.quake_listener_mcs_link
+        name: TLS link
+      - entity: sensor.quake_listener_latency
+        name: Heartbeat round-trip
+      - entity: sensor.quake_listener_pings
+        name: Heartbeats acknowledged
+      - entity: sensor.quake_listener_hardware_id
+        name: Anonymous device ID
 
   - type: horizontal-stack
     cards:
@@ -37,11 +40,11 @@ cards:
         name: Test Safety Drill
         icon: mdi:alarm-light
         tap_action:
-          action: call-service
-          service: rest_command.quake_drill
+          action: perform-action
+          perform_action: rest_command.quake_drill
       - type: button
-        name: Ping Test
+        name: MCS Ping Test
         icon: mdi:satellite-uplink
         tap_action:
-          action: call-service
-          service: rest_command.quake_ping_test
+          action: perform-action
+          perform_action: rest_command.quake_ping_test

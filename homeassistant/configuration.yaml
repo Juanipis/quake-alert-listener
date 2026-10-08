@@ -9,8 +9,12 @@ rest:
     sensor:
       - name: "Quake Listener Status"
         unique_id: quake_listener_status
-        value_template: "{{ value_json.google_mcs.connected | default(value_json.google_mcs.conectado | default(false)) | iif('Connected', 'Disconnected') }}"
-        icon: mdi:google
+        # "online" while at least one source is connected; sources_online lists them
+        value_template: "{{ value_json.status | default('unknown') }}"
+        icon: mdi:earthquake
+        json_attributes:
+          - sources_online
+          - version
       - name: "Quake Listener Pings"
         unique_id: quake_listener_pings
         value_template: "{{ value_json.google_mcs.pings_received | default(value_json.google_mcs.pings_recibidos | default(0)) }}"
@@ -63,6 +67,12 @@ rest:
         icon: mdi:access-point-network
         unit_of_measurement: "feeds"
     binary_sensor:
+      - name: "Quake Listener Online"
+        unique_id: quake_listener_online
+        value_template: "{{ value_json.status == 'online' }}"
+        device_class: connectivity
+        icon: mdi:access-point-network
+      # Google MCS is an experimental research source (no alerts observed): link only
       - name: "Quake Listener MCS Link"
         unique_id: quake_listener_mcs_link
         value_template: "{{ value_json.google_mcs.connected | default(value_json.google_mcs.conectado | default(false)) }}"
