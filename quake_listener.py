@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 """quake_listener.py
-Lightweight, autonomous client (<15 MB RAM, 0 external dependencies) for receiving
-real-time earthquake alerts from the Android Earthquake Alerts System (AEAS) via MCS (mtalk:5228).
+Earthquake warnings for your smart home, in one dependency-free Python file.
 
-Designed for seamless integration with Home Assistant and local home automation systems.
-Built with Google Antigravity (AGY) & Gemini 3.8 Flash (Thinking High).
+Follows several earthquake sources, estimates how hard each quake will shake at your
+base station (MMI) and how many seconds remain until the S-wave, and posts one
+webhook per quake to Home Assistant (or anything that accepts JSON):
+
+  wolfx  official early warnings relayed by Wolfx (JMA Japan, CENC/provincial China)
+  emsc   EMSC SeismicPortal WebSocket, worldwide rapid reports (minutes)
+  usgs   USGS real-time GeoJSON feed, worldwide (minutes, HTTP 304 polling)
+  sgc    Servicio Geologico Colombiano feed, Colombia (minutes, HTTP 304 polling)
+  shake  your own Raspberry Shake over UDP, on-site STA/LTA P-wave trigger
+  mcs    Google MCS push channel (experimental research: connects, but Google does
+         not deliver earthquake alerts to a bare socket; see docs/HOW_IT_WORKS.md)
+  POST /android  alerts captured from a real Android device by android_alert_listener.py
 
 Usage:
   python3 quake_listener.py --lat <your-lat> --lon <your-lon> --name "Base Station"
-  python3 quake_listener.py --ping-interval 120 --webhook-url http://127.0.0.1:8123/api/webhook/quake
+  python3 quake_listener.py --sources emsc,usgs,sgc --webhook-url http://127.0.0.1:8123/api/webhook/quake
   python3 quake_listener.py --test-ping
   python3 quake_listener.py --simulate
 """
@@ -41,7 +50,7 @@ if sys.version_info < (3, 8):  # pragma: no cover - guard for very old interpret
     sys.stderr.write("quake_listener.py requires Python 3.8 or newer.\n")
     sys.exit(1)
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 HOST_MCS = "mtalk.google.com"
 PORT_MCS = 5228
@@ -1097,7 +1106,7 @@ GLOBAL_DESK = None
 STATE_LOCK = threading.RLock()
 STATE = {
     "start_time": time.time(),
-    "source": "Android Earthquake Alerts System (AEAS / MCS)",
+    "source": "Quake MCS Listener (multi-source)",
     "location": {
         "name": "Base Station",
         "lat": 0.0,
@@ -1141,7 +1150,8 @@ def _new_source_state():
             "connected_since": None, "reconnects": 0, "errors": 0, "last_error": None}
 
 
-STATE["sources"] = {k: _new_source_state() for k in ("emsc", "wolfx", "shake", "android")}
+SOURCE_KEYS = ("emsc", "wolfx", "usgs", "sgc", "shake", "android")
+STATE["sources"] = {k: _new_source_state() for k in SOURCE_KEYS}
 STATE["emsc"] = STATE["sources"]["emsc"]   # v1.2 field name, kept for existing clients
 
 
@@ -1184,8 +1194,12 @@ def status_snapshot():
     with STATE_LOCK:
         loc = dict(STATE["location"])
         mcs = copy.deepcopy(STATE["google_mcs"])
+        online = [k for k, v in STATE["sources"].items() if v["enabled"] and v["connected"]]
+        if mcs["connected"]:
+            online.append("mcs")
         resp = {
-            "status": "online" if mcs["connected"] else "reconnecting",
+            "status": "online" if online else "reconnecting",
+            "sources_online": sorted(online),
             "version": __version__,
             "uptime_s": round(time.time() - STATE["start_time"], 1),
             "source": STATE["source"],
@@ -1961,6 +1975,221 @@ class WolfxSource(WebSocketSource):
 
 
 # ==============================================================================
+# Polled agency feeds: USGS (worldwide) and SGC (Colombia), GeoJSON over HTTPS
+# ==============================================================================
+# Neither agency offers a push channel, so these are polled with conditional GETs
+# (ETag / Last-Modified): an unchanged feed costs one request and an empty 304.
+# They are rapid reports, minutes after the quake, not early warnings.
+
+USGS_FEED_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson"
+SGC_FEED_URL = "https://archive.sgc.gov.co/feed/v1.0.1/summary/five_days_all.json"
+# The SGC server rejects clients whose User-Agent does not start with "Mozilla/".
+FEED_USER_AGENT = f"Mozilla/5.0 (compatible; quake-alert-listener/{__version__}; +https://github.com/Juanipis/quake-alert-listener)"
+FEED_MAX_BYTES = 8 * 1024 * 1024
+# Rough bounding box of Colombia, only used to suggest `--sources ...,sgc`.
+COLOMBIA_BOX = (-4.3, 13.5, -79.1, -66.8)   # lat_min, lat_max, lon_min, lon_max
+
+
+def _feature_parts(feature):
+    if not isinstance(feature, dict):
+        return None, None
+    geom = feature.get("geometry") or {}
+    coords = geom.get("coordinates") if isinstance(geom, dict) else None
+    props = feature.get("properties")
+    if not isinstance(coords, list) or len(coords) < 2 or not isinstance(props, dict):
+        return None, None
+    return coords, props
+
+
+def usgs_event_from_feature(feature):
+    """One USGS GeoJSON feature ([lon, lat, depth], time in ms) -> event dict, or None."""
+    coords, p = _feature_parts(feature)
+    if coords is None or p.get("type", "earthquake") != "earthquake":
+        return None
+    lon, lat = _num(coords[0]), _num(coords[1])
+    depth = _num(coords[2]) if len(coords) > 2 else None
+    mag, t = _num(p.get("mag")), _num(p.get("time"))
+    if lat is None or lon is None or mag is None or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return {
+        "source": "USGS",
+        "kind": "report",
+        "event_id": str(feature.get("id") or p.get("code")),
+        "revision": p.get("updated"),
+        "origin_ts": t / 1000.0 if t is not None else None,
+        "lat": lat,
+        "lon": lon,
+        "depth_km": round(depth, 1) if depth is not None else None,
+        "magnitude": round(mag, 1),
+        "magnitude_type": p.get("magType"),
+        "region": p.get("place"),
+        "url": p.get("url"),
+        "final": p.get("status") == "reviewed",
+        "cancelled": False,
+        "training": False,
+    }
+
+
+def sgc_event_from_feature(feature):
+    """One SGC feature -> event dict, or None.
+
+    Unlike GeoJSON, the SGC feed lists coordinates as [lat, lon, depth], and
+    `utcTime` is 'YYYY-MM-DD HH:MM' (minute precision, UTC).
+    """
+    coords, p = _feature_parts(feature)
+    if coords is None or p.get("type", "earthquake") != "earthquake":
+        return None
+    lat, lon = _num(coords[0]), _num(coords[1])
+    depth = _num(coords[2]) if len(coords) > 2 else None
+    mag = _num(p.get("mag"))
+    if lat is None or lon is None or mag is None or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    t = str(p.get("utcTime") or "").strip()
+    if len(t) == 16:          # no seconds
+        t += ":00"
+    event_id = str(feature.get("id") or f"{lat:.3f},{lon:.3f},{t}")
+    return {
+        "source": "SGC",
+        "kind": "report",
+        "event_id": event_id,
+        "revision": p.get("updated"),
+        "origin_ts": _parse_iso_utc(t),
+        "lat": lat,
+        "lon": lon,
+        "depth_km": round(depth, 1) if depth is not None else None,
+        "magnitude": round(mag, 1),
+        "magnitude_type": p.get("magType"),
+        "region": p.get("place"),
+        "url": None,
+        "final": p.get("status") == "manual",
+        "cancelled": False,
+        "training": False,
+    }
+
+
+class PolledFeedSource(threading.Thread):
+    """Polls one GeoJSON feed with conditional GETs and submits new or updated events."""
+    key = "feed"
+    label = "Feed"
+    url = ""
+    interval_s = 60
+
+    def __init__(self, args, desk):
+        super().__init__(name=f"{self.key}-feed", daemon=True)
+        self.args = args
+        self.desk = desk
+        self.etag = None
+        self.last_modified = None
+        self.seen = collections.OrderedDict()   # event_id -> revision already processed
+
+    def parse(self, feature):
+        raise NotImplementedError
+
+    def fetch(self):
+        """Feed JSON, or None when the server answers 304 Not Modified."""
+        req = urllib.request.Request(self.url, headers={"User-Agent": FEED_USER_AGENT,
+                                                        "Accept": "application/json"})
+        if self.etag:
+            req.add_header("If-None-Match", self.etag)
+        if self.last_modified:
+            req.add_header("If-Modified-Since", self.last_modified)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                raw = r.read(FEED_MAX_BYTES + 1)
+                if len(raw) > FEED_MAX_BYTES:
+                    raise ValueError(f"feed larger than {FEED_MAX_BYTES // (1024 * 1024)} MB")
+                data = json.loads(raw.decode("utf-8"))
+                self.etag = r.headers.get("ETag")
+                self.last_modified = r.headers.get("Last-Modified")
+                return data
+        except urllib.error.HTTPError as e:
+            with e:
+                if e.code == 304:
+                    return None
+                raise ConnectionError(f"HTTP {e.code}")
+
+    def process(self, data):
+        """Submit events that are new or revised since the last poll. Returns how many."""
+        features = data.get("features") if isinstance(data, dict) else None
+        count = 0
+        for feature in features if isinstance(features, list) else ():
+            try:
+                ev = self.parse(feature)
+            except (TypeError, ValueError, AttributeError):
+                ev = None
+            if ev is None:
+                continue
+            if self.seen.get(ev["event_id"], object()) == ev["revision"]:
+                continue
+            self.seen[ev["event_id"]] = ev["revision"]
+            self.seen.move_to_end(ev["event_id"])
+            impact = assess_impact(ev, self.args.lat, self.args.lon)
+            if impact["age_s"] is not None and impact["age_s"] > MAX_EVENT_AGE_S:
+                continue   # the feed also lists older quakes (hours to days)
+            count += 1
+            with STATE_LOCK:
+                st = STATE["sources"][self.key]
+                st["events_received"] += 1
+                st["last_event_ts"] = time.time()
+            if (impact["estimated_mmi"] or 0) >= 2.0 or ev["magnitude"] >= 5.0:
+                log(f"{self.label}: {describe_event(ev, impact)}")
+            try:
+                self.desk.submit(ev)
+            except Exception as e:  # one bad event must not hide the rest of the feed
+                log(f"{self.label}: skipped event {ev['event_id']}: {e}")
+        while len(self.seen) > 5000:
+            self.seen.popitem(last=False)
+        return count
+
+    def run(self):
+        errors_in_row = 0
+        while not STOP_EVENT.is_set():
+            try:
+                data = self.fetch()
+                if data is not None:
+                    self.process(data)
+                if errors_in_row:
+                    log(f"{self.label}: feed reachable again")
+                errors_in_row = 0
+                with STATE_LOCK:
+                    st = STATE["sources"][self.key]
+                    st["connected"] = True
+                    st["connected_since"] = st["connected_since"] or time.time()
+            except Exception as e:
+                errors_in_row += 1
+                reason = str(e) or e.__class__.__name__
+                with STATE_LOCK:
+                    st = STATE["sources"][self.key]
+                    st["errors"] += 1
+                    st["last_error"] = reason
+                    st["connected"] = False
+                    st["connected_since"] = None
+                if errors_in_row in (1, 3) or errors_in_row % 20 == 0:
+                    log(f"{self.label}: poll failed ({reason}); retrying")
+            STOP_EVENT.wait(self.interval_s * (1 if errors_in_row < 3 else 2))
+
+
+class USGSSource(PolledFeedSource):
+    key = "usgs"
+    label = "USGS"
+    url = USGS_FEED_URL
+    interval_s = 60     # the feed itself is regenerated every minute
+
+    def parse(self, feature):
+        return usgs_event_from_feature(feature)
+
+
+class SGCSource(PolledFeedSource):
+    key = "sgc"
+    label = "SGC"
+    url = SGC_FEED_URL
+    interval_s = 30
+
+    def parse(self, feature):
+        return sgc_event_from_feature(feature)
+
+
+# ==============================================================================
 # On-site detection: Raspberry Shake UDP datacast + STA/LTA P-wave trigger
 # ==============================================================================
 #
@@ -2231,17 +2460,20 @@ def android_probe_event(data):
         except (TypeError, ValueError):
             dist = None
 
-    raw_ts = data.get("detectado") or data.get("origin_ts") or data.get("timestamp")
+    # Only a real origin time is used as such. "detectado"/"detected" is when the phone showed
+    # the alert, seconds after the origin: treating it as the origin would make the S-wave
+    # countdown longer than the time you actually have, so without an origin there is none.
+    raw_ts = data.get("origin_ts") if data.get("origin_ts") is not None else data.get("origin_time")
     origin_ts = None
-    if isinstance(raw_ts, (int, float)):
+    if isinstance(raw_ts, (int, float)) and not isinstance(raw_ts, bool):
         origin_ts = float(raw_ts)
     elif isinstance(raw_ts, str):
         try:
             origin_ts = float(raw_ts)
         except ValueError:
-            origin_ts = parse_iso_time(raw_ts)
-    if origin_ts is None:
-        origin_ts = time.time()
+            origin_ts = _parse_iso_utc(raw_ts)
+    if lat is not None and lon is not None and not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        lat = lon = None
 
     nivel = str(data.get("nivel") or data.get("level") or "alerta").lower()
     source = data.get("fuente") or data.get("source") or "Google Android (Probe)"
@@ -2276,6 +2508,23 @@ def android_probe_event(data):
         "force_level": force_level,
         "raw_text": text,
     }
+
+
+def android_secret():
+    """Shared secret for POST /android (falls back to the webhook secret)."""
+    a = GLOBAL_ARGS
+    if a is None:
+        return ""
+    return getattr(a, "android_secret", "") or getattr(a, "webhook_secret", "") or ""
+
+
+def _is_loopback_client(addr):
+    try:
+        ip = ipaddress.ip_address(str(addr).split("%", 1)[0])
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    return ip.is_loopback or bool(mapped and mapped.is_loopback)
 
 
 class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
@@ -2412,16 +2661,20 @@ class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
                 return
             raw_body = self.rfile.read(length)
 
-            secret = getattr(GLOBAL_ARGS, "android_secret", "") if GLOBAL_ARGS else ""
-            if not secret:
-                secret = os.environ.get("SISMO_ANDROID_SECRETO") or (getattr(GLOBAL_ARGS, "webhook_secret", "") if GLOBAL_ARGS else "") or os.environ.get("QUAKE_WEBHOOK_SECRET") or ""
+            secret = android_secret()
+            sig = self.headers.get("X-Quake-Signature") or self.headers.get("X-Sismo-Firma") or ""
             if secret:
-                sig = self.headers.get("X-Sismo-Firma") or self.headers.get("X-Quake-Signature") or ""
                 expected_sig = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-                if not hmac.compare_digest(expected_sig.lower(), sig.lower()):
+                if not hmac.compare_digest(expected_sig.encode(), sig.strip().lower().encode("utf-8", "replace")):
                     log("Rejected POST /android: HMAC signature mismatch")
                     self._send_json(401, {"ok": False, "error": "invalid signature"})
                     return
+            elif not _is_loopback_client(self.client_address[0]):
+                # Without a shared secret anyone on the network could make the lights flash red.
+                log(f"Rejected POST /android from {self.client_address[0]}: set --android-secret "
+                    "to accept alerts from other machines")
+                self._send_json(403, {"ok": False, "error": "android secret required for non-local clients"})
+                return
 
             try:
                 data = json.loads(raw_body.decode("utf-8"))
@@ -2722,10 +2975,17 @@ def run_listener(args):
     if args.lat == 0.0 and args.lon == 0.0:
         log("Note: base station is at 0.0, 0.0. Set --lat/--lon so intensity and S-wave "
             "countdowns are computed for where you actually are.")
-    for key, cls in (("emsc", EMSCSource), ("wolfx", WolfxSource)):
+    for key, cls in (("emsc", EMSCSource), ("wolfx", WolfxSource), ("usgs", USGSSource), ("sgc", SGCSource)):
         if key in args.sources:
             _update_source_state(key, enabled=True)
             cls(args, desk).start()
+    lat_min, lat_max, lon_min, lon_max = COLOMBIA_BOX
+    if "sgc" not in args.sources and lat_min <= args.lat <= lat_max and lon_min <= args.lon <= lon_max:
+        log("Tip: your base station looks like it is in Colombia; add sgc to --sources "
+            "for the Servicio Geologico Colombiano feed.")
+    if "mcs" in args.sources:
+        log("Google MCS is experimental: it keeps a push connection to Google, but Google has not "
+            "been observed delivering earthquake alerts to it (see docs/HOW_IT_WORKS.md).")
     if args.shake_udp:
         _update_source_state("shake", enabled=True)
         ShakeSource(args, desk).start()
@@ -2937,11 +3197,15 @@ def _origins(s):
     return set(items)
 
 
+ALL_SOURCES = ("mcs", "emsc", "wolfx", "usgs", "sgc")
+DEFAULT_SOURCES = "mcs,emsc,wolfx,usgs"
+
+
 def _sources(s):
     items = {x.strip().lower() for x in (s or "").split(",") if x.strip()}
-    unknown = items - {"mcs", "emsc", "wolfx"}
+    unknown = items - set(ALL_SOURCES)
     if unknown:
-        raise argparse.ArgumentTypeError(f"unknown source(s): {', '.join(sorted(unknown))} (use mcs, emsc, wolfx)")
+        raise argparse.ArgumentTypeError(f"unknown source(s): {', '.join(sorted(unknown))} (use {', '.join(ALL_SOURCES)})")
     return items
 
 
@@ -2963,7 +3227,10 @@ def _hosts(s):
 
 
 def build_parser():
-    env = os.environ.get
+    def env(key, default=""):
+        # An empty variable (common in compose files) means "not set", not "empty value"
+        return os.environ.get(key) or default
+
     parser = argparse.ArgumentParser(
         prog="quake_listener.py",
         description="Quake MCS Listener - Lightweight Android Earthquake Alerts System (AEAS) Client"
@@ -2982,10 +3249,10 @@ def build_parser():
     parser.add_argument("--webhook-secret", type=str, default=env("QUAKE_WEBHOOK_SECRET", ""), help="Optional HMAC-SHA256 secret for payload signing (prefer the env var: CLI args are visible in `ps`)")
     parser.add_argument("--credentials-file", type=str, default=env("QUAKE_CREDENTIALS_FILE", DEFAULT_CREDENTIALS_FILE), help="Where the anonymous device identity is stored (default: ~/.quake_device_credentials.json)")
     parser.add_argument("--device-type", choices=["android", "chrome"], default=env("QUAKE_DEVICE_TYPE", "android"), help="Device checkin identity profile: android (GMS Pixel 6 profile) or chrome (Chromium GCM profile). Default: android")
-    parser.add_argument("--android-secret", type=str, default=env("SISMO_ANDROID_SECRETO", env("QUAKE_ANDROID_SECRET", "")), help="Optional HMAC-SHA256 secret to verify incoming alerts from android_alert_listener.py (falls back to SISMO_ANDROID_SECRETO env var)")
+    parser.add_argument("--android-secret", type=str, default=env("QUAKE_ANDROID_SECRET", env("SISMO_ANDROID_SECRETO", "")), help="HMAC-SHA256 secret that POST /android requests must be signed with (default: --webhook-secret). Without any secret, only clients on this machine may post alerts. Prefer the env var QUAKE_ANDROID_SECRET")
     parser.add_argument("--locale", type=str, default=env("QUAKE_LOCALE", "en_US"), help="Locale for device registration")
     parser.add_argument("--timezone", type=str, default=env("QUAKE_TIMEZONE", "UTC"), help="Timezone for device registration")
-    parser.add_argument("--sources", type=_sources, default=env("QUAKE_SOURCES", "mcs,emsc,wolfx"), help="Push sources to follow: mcs (Google AEAS, experimental), emsc (worldwide rapid reports), wolfx (official early warnings for Japan and China). Default: mcs,emsc,wolfx")
+    parser.add_argument("--sources", type=_sources, default=env("QUAKE_SOURCES", DEFAULT_SOURCES), help="Sources to follow: wolfx (official early warnings, Japan and China), emsc (worldwide WebSocket reports), usgs (worldwide reports, polled), sgc (Colombia, polled), mcs (Google push channel, experimental research). Default: " + DEFAULT_SOURCES)
     parser.add_argument("--no-emsc", action="store_true", default=env("QUAKE_NO_EMSC", "") not in ("", "0", "false"), help="Shortcut to drop emsc from --sources")
     parser.add_argument("--notice-mmi", type=_float_range(1.0, 12.0, "intensity"), default=env("QUAKE_NOTICE_MMI", "3.0"), help="Notify (level 'notice') when the estimated intensity at your base station reaches this MMI (default: 3.0, like Android's 'Be Aware')")
     parser.add_argument("--alert-mmi", type=_float_range(1.0, 12.0, "intensity"), default=env("QUAKE_ALERT_MMI", "5.0"), help="Raise level 'alert' from this estimated MMI (default: 5.0, like Android's 'Take Action')")

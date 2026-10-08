@@ -527,7 +527,8 @@ class HttpApi(unittest.TestCase):
         self.assertEqual(code, 200)
         for k in ("google_mcs", "sources", "emsc", "recent_logs", "total_detections", "last_quake"):
             self.assertIn(k, body)
-        self.assertEqual(set(body["sources"]), {"emsc", "wolfx", "shake", "android"})
+        self.assertEqual(set(body["sources"]), {"emsc", "wolfx", "usgs", "sgc", "shake", "android"})
+        self.assertIn("sources_online", body)
 
     def test_guards(self):
         self.assertEqual(self.get("/status", {"Host": "attacker.example"})[0], 403)
@@ -535,7 +536,7 @@ class HttpApi(unittest.TestCase):
         self.assertEqual(self.get("/nope")[0], 404)
 
     def test_post_android_alert(self):
-        args = ql.build_parser().parse_args(["--lat", "6.33", "--lon", "-75.55", "--name", "Bello"])
+        args = ql.build_parser().parse_args(["--lat", "0.5", "--lon", "0.5", "--name", "Base Station"])
         dispatched_list = []
         desk = ql.DetectionDesk(args, lambda p: dispatched_list.append(p))
         ql.GLOBAL_DESK = desk
@@ -548,8 +549,8 @@ class HttpApi(unittest.TestCase):
                 "texto": "Alerta sísmica Google (pantalla completa): M5.5 a 50 km",
                 "magnitud": 5.5,
                 "distancia_km": 50.0,
-                "lat": 6.35,
-                "lon": -75.50
+                "lat": 0.52,
+                "lon": 0.55
             }
             code, resp = self.post_json("/android", payload)
             self.assertEqual(code, 200)
@@ -594,7 +595,139 @@ class HttpApi(unittest.TestCase):
             ql.GLOBAL_DESK = None
 
 
+class AndroidProbe(unittest.TestCase):
+    def test_iso_origin_time(self):
+        ev = ql.android_probe_event({"magnitude": 5, "origin_time": "2026-01-01T00:00:00Z", "lat": 0.5, "lon": 0.5})
+        self.assertEqual(ev["origin_ts"], 1767225600.0)
+        self.assertEqual(ev["magnitude"], 5.0)
+
+    def test_detection_time_is_not_an_origin(self):
+        # The phone shows the alert seconds after the origin: no countdown rather than a too-long one
+        ev = ql.android_probe_event({"nivel": "alerta", "detectado": time.time(), "lat": 0.5, "lon": 0.5})
+        self.assertIsNone(ev["origin_ts"])
+        self.assertEqual(ev["force_level"], "alert")
+        payload = ql.DetectionDesk(make_args(lat=0.4, lon=0.4), lambda p: None).submit(ev)
+        self.assertEqual(payload["level"], "alert")
+        self.assertIsNone(payload["s_wave_eta_s"])
+
+    def test_bad_values(self):
+        ev = ql.android_probe_event({"magnitude": "x", "lat": 95, "lon": 0.5, "origin_ts": "nonsense"})
+        self.assertIsNone(ev["magnitude"])
+        self.assertIsNone(ev["lat"])
+        self.assertIsNone(ev["origin_ts"])
+
+    def test_loopback_clients(self):
+        for addr, ok in [("127.0.0.1", True), ("::1", True), ("::ffff:127.0.0.1", True),
+                         ("192.168.1.20", False), ("172.17.0.1", False), ("garbage", False)]:
+            self.assertEqual(ql._is_loopback_client(addr), ok, addr)
+
+
+def usgs_feature(eid="us1", mag=5.2, t=None, lat=0.4, lon=0.3, updated=1):
+    t = time.time() if t is None else t
+    return {"type": "Feature", "id": eid, "geometry": {"type": "Point", "coordinates": [lon, lat, 12.3]},
+            "properties": {"mag": mag, "time": int(t * 1000), "updated": updated, "place": "Test Region",
+                           "type": "earthquake", "status": "automatic", "magType": "mb", "url": "https://example.org"}}
+
+
+def sgc_feature(eid="SGC1", mag=4.1, t=None, lat=0.4, lon=0.3, updated="2026-01-01 00:05:00"):
+    t = time.time() if t is None else t
+    utc = time.strftime("%Y-%m-%d %H:%M", time.gmtime(t))
+    return {"type": "Feature", "id": eid, "geometry": {"type": "Point", "coordinates": [lat, lon, 20.0]},
+            "properties": {"mag": mag, "utcTime": utc, "updated": updated, "place": "Test Region",
+                           "type": "earthquake", "status": "manual", "magType": "MLr"}}
+
+
+class PolledFeeds(unittest.TestCase):
+    def test_usgs_feature(self):
+        ev = ql.usgs_event_from_feature(usgs_feature(t=1767225600))
+        self.assertEqual((ev["lat"], ev["lon"], ev["depth_km"]), (0.4, 0.3, 12.3))
+        self.assertEqual((ev["source"], ev["kind"], ev["magnitude"]), ("USGS", "report", 5.2))
+        self.assertEqual(ev["origin_ts"], 1767225600.0)
+        self.assertIsNone(ql.usgs_event_from_feature({"geometry": None, "properties": {}}))
+        bad = usgs_feature()
+        bad["properties"]["type"] = "quarry blast"
+        self.assertIsNone(ql.usgs_event_from_feature(bad))
+
+    def test_sgc_feature_is_lat_lon_order(self):
+        ev = ql.sgc_event_from_feature(sgc_feature(t=1767225600, lat=0.4, lon=0.3))
+        self.assertEqual((ev["lat"], ev["lon"], ev["depth_km"]), (0.4, 0.3, 20.0))
+        self.assertEqual(ev["origin_ts"], 1767225600.0)
+        self.assertTrue(ev["final"])
+
+    def make_source(self, cls, **kw):
+        sent = []
+        desk = ql.DetectionDesk(make_args(lat=0.5, lon=0.5, **kw), sent.append)
+        return cls(make_args(lat=0.5, lon=0.5, **kw), desk), sent
+
+    def test_process_dedupes_and_skips_old(self):
+        src, sent = self.make_source(ql.USGSSource)
+        old = usgs_feature("old", t=time.time() - 3 * 3600)
+        data = {"features": [usgs_feature("new"), old, {"broken": True}]}
+        self.assertEqual(src.process(data), 1)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["status"], "rapid report")
+        self.assertEqual(src.process(data), 0)               # unchanged: nothing resubmitted
+        data["features"][0]["properties"]["updated"] = 2     # revised: evaluated again
+        self.assertEqual(src.process(data), 1)
+
+    def test_same_quake_from_two_agencies_notifies_once(self):
+        sent = []
+        args = make_args(lat=0.5, lon=0.5)
+        desk = ql.DetectionDesk(args, sent.append)
+        t = time.time() - 60
+        ql.SGCSource(args, desk).process({"features": [sgc_feature(t=t, mag=5.0)]})
+        ql.USGSSource(args, desk).process({"features": [usgs_feature(t=t + 20, mag=5.0)]})
+        self.assertEqual(len(sent), 1)
+
+    def test_conditional_get(self):
+        hits = []
+
+        class Feed(ql.http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                hits.append((self.headers.get("If-None-Match"), self.headers.get("User-Agent")))
+                if self.headers.get("If-None-Match") == '"v1"':
+                    self.send_response(304)
+                    self.end_headers()
+                    return
+                body = json.dumps({"features": []}).encode()
+                self.send_response(200)
+                self.send_header("ETag", '"v1"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        httpd = ql.http.server.ThreadingHTTPServer(("127.0.0.1", 0), Feed)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            src, _ = self.make_source(ql.USGSSource)
+            src.url = f"http://127.0.0.1:{httpd.server_address[1]}/feed.json"
+            self.assertEqual(src.fetch(), {"features": []})
+            self.assertIsNone(src.fetch())                   # 304 Not Modified
+            self.assertEqual(hits[1][0], '"v1"')
+            self.assertTrue(hits[0][1].startswith("Mozilla/5.0"))  # SGC rejects other agents
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+
 class Cli(unittest.TestCase):
+    def test_default_sources(self):
+        a = ql.build_parser().parse_args([])
+        self.assertEqual(a.sources, {"mcs", "emsc", "wolfx", "usgs"})
+        self.assertEqual(ql.build_parser().parse_args(["--sources", "sgc,usgs"]).sources, {"sgc", "usgs"})
+        old = os.environ.get("QUAKE_SOURCES")
+        os.environ["QUAKE_SOURCES"] = ""        # empty compose variable = default, not "no sources"
+        try:
+            self.assertEqual(ql.build_parser().parse_args([]).sources, {"mcs", "emsc", "wolfx", "usgs"})
+        finally:
+            if old is None:
+                del os.environ["QUAKE_SOURCES"]
+            else:
+                os.environ["QUAKE_SOURCES"] = old
+
     def test_sources_and_aliases(self):
         p = ql.build_parser()
         a = p.parse_args(["--sources", "emsc,wolfx", "--emsc-min-mag", "3.5", "--emsc-radius-km", "200"])

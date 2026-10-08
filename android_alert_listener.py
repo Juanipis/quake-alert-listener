@@ -1,15 +1,26 @@
 #!/usr/bin/env python3
 """android_alert_listener.py
-Real-time Google Android Earthquake Alerts System (AEAS) Sentinel.
+Optional companion: forwards Google's Android Earthquake Alerts (AEAS) from a real
+Android device to Quake MCS Listener (POST :8990/android).
 
-Streams Android kernel logcat events in real time (<10 ms latency, 0.0% CPU idle)
-and dispatches authenticated HMAC-SHA256 alerts to Quake MCS Listener (:8990/android).
-Compatible with physical Android devices (ADB) and containerized Android (Redroid).
+Google only sends AEAS alerts to devices that report their location, so this watches
+one that does: a phone over ADB or a containerized Android (Redroid) with a mock
+location. It follows logcat (no polling), confirms the full-screen alert with
+`dumpsys activity top`, ignores the settings demo, and posts the alert signed with
+HMAC-SHA256. Status: running 24/7 on a Raspberry Pi 4 since October 2026; so far it has
+only seen Google's settings demo (correctly ignored), not a real earthquake alert.
+See docs/REDROID_SENTINEL.md.
+
+Environment:
+  QUAKE_ALERT_URL       e.g. http://127.0.0.1:8990/android (required to send)
+  QUAKE_ANDROID_SECRET  shared HMAC secret (also read: QUAKE_SECRET, SISMO_ANDROID_SECRETO)
+  QUAKE_LAT, QUAKE_LON  base station, injected as the device location (Redroid)
 
 Protocol: POST QUAKE_ALERT_URL with JSON payload
   {"source": "Google Android", "level": "alert"|"notice", "detected": <epoch>, "text": ...,
    "magnitude"?: float, "distance_km"?: number, "lat"?: float, "lon"?: float}
-and header X-Quake-Signature / X-Sismo-Firma = hex HMAC-SHA256 of the exact request body.
+and header X-Quake-Signature = hex HMAC-SHA256 of the exact request body. `detected` is
+when the device showed the alert, not the origin time, so the bridge gives no countdown.
 
 Usage:
   android_alert_listener.py                 Stream events in real time
@@ -32,7 +43,8 @@ import time
 import urllib.request
 
 URL = os.environ.get("QUAKE_ALERT_URL") or os.environ.get("ANDROID_ALERT_URL", "")
-SECRET = os.environ.get("QUAKE_SECRET") or os.environ.get("SISMO_ANDROID_SECRETO", "")
+SECRET = (os.environ.get("QUAKE_ANDROID_SECRET") or os.environ.get("QUAKE_SECRET")
+          or os.environ.get("SISMO_ANDROID_SECRETO", ""))
 SERIAL = os.environ.get("ADB_SERIAL", "")
 CONTAINER = os.environ.get("DOCKER_CONTAINER", "")
 DEDUPE_S = 10 * 60
@@ -208,20 +220,15 @@ def build_notification_event(text):
 
 def dispatch(event):
     body = json.dumps(event, ensure_ascii=False).encode()
-    if not (URL and SECRET):
-        log(f"[dry-run] Detected alert (not sending, missing URL or SECRET): {body.decode()}")
+    if not URL:
+        log(f"[dry-run] Detected alert (not sending, QUAKE_ALERT_URL is not set): {body.decode()}")
         return
-    sig = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
-    req = urllib.request.Request(
-        URL,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "X-Quake-Signature": sig,
-            "X-Sismo-Firma": sig
-        },
-    )
+    headers = {"Content-Type": "application/json"}
+    if SECRET:
+        sig = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
+        headers["X-Quake-Signature"] = sig
+        headers["X-Sismo-Firma"] = sig   # legacy header name
+    req = urllib.request.Request(URL, data=body, method="POST", headers=headers)
     with urllib.request.urlopen(req, timeout=10) as resp:
         log(f"Dispatched alert to gateway ({resp.status}): {body.decode()}")
 
@@ -262,7 +269,7 @@ def run_once():
 
 
 def start_logcat_stream():
-    """Starts continuous logcat streaming filtered at kernel/ADB level for 0.0% CPU."""
+    """Starts a continuous logcat stream, filtered on the device side so idle cost stays low."""
     filter_regex = "EAlert|ealert|sismo|Sismo|earthquake|Earthquake|terremoto|temblor"
     if CONTAINER:
         cmd = [
@@ -286,11 +293,11 @@ def start_logcat_stream():
 
 def listen_realtime():
     last = {"time": 0.0, "level": 0}
-    log("Starting real-time Android AEAS sentinel (<10 ms latency, 0% CPU idle with kernel filter)")
-    if URL and SECRET:
-        log(f"Target gateway: {URL}")
+    log("Starting Android AEAS sentinel (filtered logcat stream)")
+    if URL:
+        log(f"Target gateway: {URL}{'' if SECRET else ' (unsigned: only accepted by a bridge on this machine)'}")
     else:
-        log("Running in local test mode (no remote dispatch)")
+        log("Running in local test mode (QUAKE_ALERT_URL not set, nothing is sent)")
 
     ensure_connection()
     apply_location_beacon()
