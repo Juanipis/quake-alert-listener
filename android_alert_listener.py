@@ -7,8 +7,9 @@ Google only sends AEAS alerts to devices that report their location, so this wat
 one that does: a phone over ADB or a containerized Android (Redroid) with a mock
 location. It follows logcat (no polling), confirms the full-screen alert with
 `dumpsys activity top`, ignores the settings demo, and posts the alert signed with
-HMAC-SHA256. Status: running 24/7 on a Raspberry Pi 4 since October 2026; so far it has
-only seen Google's settings demo (correctly ignored), not a real earthquake alert.
+HMAC-SHA256. Status: a Redroid container ran it on a Raspberry Pi 4 on 2026-10-07; it only
+saw Google's settings demo (correctly ignored), never a real earthquake alert, and was
+paused because that image's Play services (22.09) can't be updated.
 See docs/REDROID_SENTINEL.md.
 
 Environment:

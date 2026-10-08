@@ -23,7 +23,7 @@
 | **USGS** real-time feed | `usgs` | Every quake of the last hour, polled every 60 s with HTTP 304 caching | Minutes | Worldwide | ✅ Live |
 | **SGC** (Servicio Geológico Colombiano) | `sgc` | Colombia's national catalogue, polled every 30 s with HTTP 304 caching | Minutes | Colombia | ✅ Live, opt-in |
 | **Your own sensor** ([Raspberry Shake](https://raspberryshake.org) UDP datacast) | `--shake-udp` | On-site P-wave trigger (STA/LTA) | **Seconds**, no network in between | Anywhere you install one | 🧪 Tested with synthetic signals |
-| **Android device** via [`android_alert_listener.py`](docs/REDROID_SENTINEL.md) | `POST /android` | Google's Android Earthquake Alert, captured from a real (or containerized) Android | Seconds after Google alerts the device | Where Google runs AEAS | 🧪 Running on one Pi since Oct 2026, no real alert captured yet |
+| **Android device** via [`android_alert_listener.py`](docs/REDROID_SENTINEL.md) | `POST /android` | Google's Android Earthquake Alert, captured from a real (or containerized) Android | Seconds after Google alerts the device | Where Google runs AEAS | 🧪 Tried on a Pi (Oct 2026), no real alert captured; paused |
 | **Google MCS socket** (`mtalk.google.com:5228`) | `mcs` | Working implementation of Google's push protocol, kept for research | n/a | n/a | 🔬 Connects, but Google has never delivered an alert to it ([why](docs/HOW_IT_WORKS.md#why-the-google-path-is-a-long-shot)) |
 
 Defaults: `mcs,emsc,wolfx,usgs`. In Colombia add `sgc` (the bridge suggests it when your base station is there).
@@ -49,7 +49,7 @@ Google's **Android Earthquake Alerts System (AEAS)** is the world's largest eart
 
 1. **The wire protocol works.** `quake_listener.py` implements Google's MCS push protocol (`mtalk.google.com:5228`, TLS, version byte `41`, varint-framed protobufs) field by field against Chromium's open-source GCM client: checkin, login, heartbeats, stream acknowledgements, idle replies and the port-443 fallback. It connects and stays connected.
 2. **But a socket receives nothing.** Decompiling Google Play services showed alerts arrive through `GcmReceiverChimeraService` and are decoded into `EAlertUxArgs`. Google only sends them to devices that report their location; a bare socket never matches an alert area.
-3. **So we watch a real Android instead.** [`android_alert_listener.py`](android_alert_listener.py) follows a phone over ADB, or a headless Android container (Redroid) pinned to your home with a mock location, confirms the full-screen alert, and posts it to the bridge signed with HMAC-SHA256. It has run 24/7 on a Raspberry Pi 4 since 7 Oct 2026 at about 2 % CPU; it has not seen a real earthquake yet, so it is an extra layer, not the foundation.
+3. **So we watch a real Android instead.** [`android_alert_listener.py`](android_alert_listener.py) follows a phone over ADB, or a headless Android container (Redroid) pinned to your home with a mock location, confirms the full-screen alert, and posts it to the bridge signed with HMAC-SHA256. We ran it on a Raspberry Pi 4 in October 2026: it caught only Google's settings demo, and the Redroid image's Play services (2022) turned out to be impossible to update, so it is an extra layer, not the foundation.
 
 The full protocol walkthrough is in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md); the container setup in [docs/REDROID_SENTINEL.md](docs/REDROID_SENTINEL.md).
 

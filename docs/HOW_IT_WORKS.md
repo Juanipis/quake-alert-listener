@@ -11,7 +11,7 @@ This is a walkthrough of what `quake_listener.py` actually does on the wire, wha
 | USGS real-time feed (polled) | `usgs` | `report` | minutes | live |
 | Servicio Geológico Colombiano feed (polled) | `sgc` | `report` | minutes | live, opt-in |
 | Raspberry Shake UDP datacast + STA/LTA | `--shake-udp` | `onsite` | seconds, on site | tested with synthetic signals |
-| Real Android device via `android_alert_listener.py` | `POST /android` | `aeas` | seconds after Google alerts the device | running on one Raspberry Pi since Oct 2026; no real alert captured yet |
+| Real Android device via `android_alert_listener.py` | `POST /android` | `aeas` | seconds after Google alerts the device | tried on a Raspberry Pi in Oct 2026; no real alert captured; paused |
 | Google MCS socket + AEAS decoder | `mcs` | `aeas` | would be seconds | experimental research; never observed delivering ([why](#why-the-google-path-is-a-long-shot)) |
 
 ```mermaid
@@ -224,7 +224,7 @@ If Google only alerts devices that report a location, the way in is a device tha
 - **Capture.** The listener follows a filtered `logcat` stream (no polling). When an `EAlert` line appears it confirms that `EAlertSafetyInfoActivity` is really in front with `dumpsys activity top`, reads `EAlertUxArgs` (magnitude, epicenter, distance), and posts it to `POST /android`, signed with HMAC-SHA256.
 - **False-alarm guards.** Lifecycle lines (`onPause`, `onDestroy`, `finish`…), the settings screens (`EAlertSettings…`) and Google's demo alert (`isTestAlert=true`) are ignored.
 - **Timing.** The alert does not include its origin time, so the bridge sends no S-wave countdown for it rather than one that would be too long.
-- **Status.** Running 24/7 on one Raspberry Pi 4 in Colombia since 2026-10-07. It has seen and correctly ignored Google's settings demo. It has **not yet captured a real earthquake alert**, and whether Google alerts a mock-located container at all is still unproven.
+- **Status.** Ran on a Raspberry Pi 4 in Colombia on 2026-10-07. It saw and correctly ignored Google's settings demo, but **never captured a real earthquake alert**. It was then paused: the Redroid image's Play services (22.09) is signed with a rotated key, so Android rejects current Google-signed updates (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), and an outdated Play services is unlikely to receive alerts. A real phone over ADB is the realistic way to try this again.
 
 See [docs/REDROID_SENTINEL.md](REDROID_SENTINEL.md) for the complete step-by-step setup guide.
 

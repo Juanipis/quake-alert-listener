@@ -31,7 +31,7 @@ Quake MCS Listener turns every report into local impact: an estimated intensity 
 ### Key highlights
 - **⚡ Zero dependencies:** one file on Python's standard library, Python 3.8+.
 - **🪶 Light:** about 30 MB of RAM with every source on; unchanged polled feeds cost an empty HTTP 304.
-- **📡 Sources, with honest status:** official early warnings for Japan and China (seconds), EMSC, USGS and Colombia's SGC (minutes), a Raspberry Shake on-site trigger (tested with synthetic signals), and an optional Android sentinel for Google's alerts (running since Oct 2026, no real alert captured yet).
+- **📡 Sources, with honest status:** official early warnings for Japan and China (seconds), EMSC, USGS and Colombia's SGC (minutes), a Raspberry Shake on-site trigger (tested with synthetic signals), and an experimental Android sentinel for Google's alerts (tried in Oct 2026, no real alert captured, paused).
 - **🏠 Home Assistant native:** signed webhooks, REST sensors, a countdown automation ("🚨 Shaking in 18 s") and a dashboard card.
 - **🚀 Try it in one line:** `run.sh` / `run.ps1` start a temporary bridge that the web console finds by itself. Docker Compose and a hardened systemd unit for 24/7.
 - **🔬 Research included:** a working client for Google's MCS push protocol, verified against Chromium, and the write-up of why a bare socket never receives Google's alerts.
@@ -52,7 +52,7 @@ What it does today:
 
 The honest limits:
 - Early warnings in seconds only exist where an agency publishes them, or where you run your own sensor. Elsewhere you get reports minutes after the quake: still great for automations and peace of mind, not for ducking under a table.
-- Google's alerts: we implemented their MCS push protocol (it connects fine), then found that Google only alerts devices that report a location. So there's now an optional Android container that watches for alerts and forwards them. It has run on a Pi since October 2026 and hasn't seen a real quake yet.
+- Google's alerts: we implemented their MCS push protocol (it connects fine), then found that Google only alerts devices that report a location. We then tried an Android container that watches for alerts; it never caught a real one, and its Play services couldn't be updated, so it's paused. A real phone over USB is the next experiment.
 
 If you live in a seismic zone and run Home Assistant, I'd love you to try it and tell me what you see, especially if the Android sentinel ever catches a real alert.
 
