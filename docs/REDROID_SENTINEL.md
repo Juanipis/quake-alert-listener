@@ -1,6 +1,13 @@
-# 🤖 Autonomous Micro-Android Sentinel (Redroid on Raspberry Pi / Linux)
+# 🤖 Android Sentinel (Redroid on Raspberry Pi / Linux)
 
-> **Run a 100% autonomous, headless Google Android Earthquake Alerts System (AEAS) node directly on your Linux home server or Raspberry Pi 4 without needing a physical phone or a computer running an emulator.**
+> **Optional and experimental.** A headless Android container that keeps Google Play services located at your home, so it can receive Google's Android Earthquake Alerts (AEAS), and a small script that forwards them to the bridge. No physical phone, no desktop emulator.
+
+> [!IMPORTANT]
+> **Status (October 2026).** This setup has run 24/7 on a Raspberry Pi 4 in Colombia since 2026-10-07. Container, location beacon and log capture work, and Google's settings demo is detected and correctly ignored. **No real earthquake alert has been captured yet**, and it is still unproven that Google alerts a mock-located container. Treat it as an extra layer on top of the [sources that work today](HOW_IT_WORKS.md#5-sources-that-work-today), never as your only warning.
+
+**Why it exists.** Google only sends AEAS alerts to devices that report their location, so the plain MCS socket in `quake_listener.py` never receives them ([details](HOW_IT_WORKS.md#why-the-google-path-is-a-long-shot)). A real Android system that reports a location is the only way in.
+
+**What it costs.** An Android 11 system in a privileged container: about 2 % CPU on a Pi 4 once debloated (measured 1.7–1.9 %), plus the RAM and a few GB of storage Android needs. The bridge itself stays a single Python file.
 
 ---
 
@@ -12,15 +19,15 @@ flowchart TD
         subgraph Docker: redroid-quake
             GMS[Google Play Services<br/>v22.09.20+ OpenGApps]
             LOC[FakeGPS Beacon<br/>com.lexa.fakegps<br/>Mock Location Foreground Service]
-            UI[EAlertSafetyInfoActivity<br/>Google AEAS Fullscreen UI]
+            UI[EAlertSafetyInfoActivity<br/>Google AEAS full-screen alert]
             GMS --> LOC
             GMS --> UI
         end
 
         subgraph Systemd Services
             BINDER[binderfs.service<br/>Mounts /dev/binderfs]
-            LISTENER[redroid-alert-listener.service<br/>Streaming Logcat <10 ms latency]
-            DAEMON[sismo-daemon / quake_listener<br/>Port 8990 + Google MCS TLS]
+            LISTENER[redroid-alert-listener.service<br/>android_alert_listener.py<br/>filtered logcat stream]
+            DAEMON[quake_listener.py<br/>REST :8990]
         end
 
         UI -- Logcat Stream --> LISTENER
@@ -33,13 +40,10 @@ flowchart TD
     end
 
     subgraph External Servers
-        GOOGLE[mtalk.google.com:5228<br/>Google Cloud AEAS Push]
-        SGC[archive.sgc.gov.co<br/>Official Geological Feed]
-        USGS[earthquake.usgs.gov<br/>Global Regional Feed]
+        GOOGLE[Google AEAS<br/>push to located devices]
+        FEEDS[Wolfx · EMSC · USGS · SGC]
         GOOGLE --> GMS
-        GOOGLE --> DAEMON
-        SGC --> DAEMON
-        USGS --> DAEMON
+        FEEDS --> DAEMON
     end
 ```
 
@@ -109,11 +113,11 @@ docker pull redroid/redroid:11.0.0_gapps
 ```
 
 ### B. Persistent Directory & Launch
-Run the container binding ADB **strictly to localhost** (`127.0.0.1:5555`) to keep your LAN completely secure:
+Run the container with ADB bound **only to localhost** (`127.0.0.1:5555`), so nothing else on your LAN can reach it:
 
 ```bash
 # Create persistent data directory
-mkdir -p /home/juanipis/redroid-data
+mkdir -p ~/redroid-data
 
 # Launch container
 docker run -d \
@@ -121,7 +125,7 @@ docker run -d \
   --restart always \
   --privileged \
   -v /dev/binderfs:/dev/binderfs \
-  -v /home/juanipis/redroid-data:/data \
+  -v ~/redroid-data:/data \
   -p 127.0.0.1:5555:5555 \
   redroid/redroid:11.0.0_gapps \
   androidboot.hardware=mt6885 \
@@ -130,11 +134,14 @@ docker run -d \
   ro.boot.container=1
 ```
 
+> [!WARNING]
+> Redroid needs `--privileged`, and `ro.secure=0` gives root inside Android. Run it only on a machine you control, keep ADB on `127.0.0.1`, and keep `/data` out of shared folders.
+
 ---
 
-## 3. Debloating for Ultra-Low Resource Usage
+## 3. Debloating
 
-By default, an unthrottled Android container runs launcher animations, Play Store sync, and live wallpapers, consuming >300% CPU. Run the following once to stabilize idle CPU to **~1.7%**:
+Out of the box the container runs the launcher, Play Store sync and live wallpapers, which kept the Pi's CPU busy (over 300 % in our case). Disable them once; idle CPU then settles around 2 %:
 
 ```bash
 docker exec redroid-quake pm disable-user --user 0 com.android.launcher3
@@ -148,57 +155,70 @@ docker exec redroid-quake pm disable-user --user 0 com.google.android.apps.pixel
 
 ## 4. Injecting Base Station Location Beacon
 
-Google's cloud server routes early warnings based on the reporting location of the device. Install a mock GPS foreground service to anchor the node permanently to your base station coordinates:
+Google decides who gets an alert from the location each device reports. Pin the container to your base station with a mock-location app. The listener drives the open-source **FakeGPS** app (`com.lexa.fakegps`) through its `START` intent; get its APK from a source you trust.
 
 ```bash
+# Your base station (replace with your own coordinates)
+LAT=<your-lat>; LON=<your-lon>
+
 # 1. Enable system location
 docker exec redroid-quake cmd location set-location-enabled true
 docker exec redroid-quake settings put secure location_mode 3
 
-# 2. Install FakeGPS and grant mock location
-docker exec redroid-quake pm install -r /path/to/fakegps.apk
+# 2. Install FakeGPS and allow it to mock the location
+docker cp fakegps.apk redroid-quake:/data/local/tmp/fakegps.apk
+docker exec redroid-quake pm install -r /data/local/tmp/fakegps.apk
 docker exec redroid-quake appops set com.lexa.fakegps android:mock_location allow
 
-# 3. Start persistent foreground location service (e.g. Bello, Antioquia: 6.3373, -75.5580)
-docker exec redroid-quake am start-foreground-service -a com.lexa.fakegps.START -e lat 6.3373 -e long -75.5580
+# 3. Start the foreground location service
+docker exec redroid-quake am start-foreground-service -a com.lexa.fakegps.START -e lat "$LAT" -e long "$LON"
 ```
 
-Verify in Android LocationManager:
+Check that Android reports your coordinates:
 ```bash
 docker exec redroid-quake dumpsys location | grep -E "last location="
-# Output:
-# last location=Location[network 6.337300, -75.557997 hAcc=3 m]
-# last location=Location[gps 6.337297, -75.558003 hAcc=5 m]
+# last location=Location[gps <your-lat>, <your-lon> hAcc=5 m]
 ```
+
+The listener re-applies this beacon every 10 minutes, so a restart of the app or the container heals by itself.
 
 ---
 
 ## 5. Setting up `android_alert_listener.py` as a Systemd Service
 
+The listener talks to the container through `docker exec`, so its user must be in the `docker` group (which is root-equivalent on that machine). Put the shared secret in a file only that user can read:
+
+```bash
+# Same secret as the bridge's QUAKE_ANDROID_SECRET
+sudo install -m 600 -o <user> /dev/null /etc/quake-android.env
+echo "QUAKE_ANDROID_SECRET=$(openssl rand -hex 32)" | sudo tee /etc/quake-android.env > /dev/null
+```
+
 Create `/etc/systemd/system/redroid-alert-listener.service`:
 
 ```ini
 [Unit]
-Description=Redroid Seismic Alert Sentinel (Google AEAS)
+Description=Android earthquake alert sentinel (Redroid -> Quake MCS Listener)
 After=docker.service binderfs.service
 Wants=docker.service
 
 [Service]
 Type=simple
-User=juanipis
-WorkingDirectory=/home/juanipis/projects/IoTCeiba606
+User=<user>
 Environment="DOCKER_CONTAINER=redroid-quake"
 Environment="QUAKE_ALERT_URL=http://127.0.0.1:8990/android"
-Environment="QUAKE_LAT=6.3373"
-Environment="QUAKE_LON=-75.5580"
-EnvironmentFile=/home/juanipis/projects/IoTCeiba606/.sismo.env
-ExecStart=/usr/bin/python3 /home/juanipis/projects/IoTCeiba606/android_alert_listener.py
+Environment="QUAKE_LAT=<your-lat>"
+Environment="QUAKE_LON=<your-lon>"
+EnvironmentFile=/etc/quake-android.env
+ExecStart=/usr/bin/python3 /opt/quake-listener/android_alert_listener.py
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+Copy `android_alert_listener.py` to `/opt/quake-listener/` and give the bridge the same secret (`QUAKE_ANDROID_SECRET` in `/etc/default/quake-listener`, see `deploy/quake-listener.env`). Without one, the bridge accepts `/android` only from the same machine.
 
 Enable and start the service:
 ```bash
@@ -208,11 +228,24 @@ sudo systemctl enable --now redroid-alert-listener.service
 
 ---
 
-## 6. Zero False Alarm Protection
+## 6. False-alarm guards
 
-The sentinel listener includes multi-stage filtering to prevent false positives:
-1. **Kernel Logcat Regex Filtering:** Streams directly from `docker exec redroid-quake logcat -v time -b main -b events -b system -T 1 -e ...`.
-2. **Lifecycle Exit Filtering:** Explicitly ignores activity teardown logs (`onDestroy`, `onPause`, `onStop`, `finish`).
-3. **Demo Isolation:** Detects `isTestAlert=true` and settings screens (`EAlertSettings`), preventing configuration menus from firing alarms.
-4. **Active Top Activity Verification:** Only dispatches when `EAlertSafetyInfoActivity` is confirmed visible in `dumpsys activity top`. If the window is closing or absent, the event is safely discarded.
-5. **HMAC-SHA256 Signing:** All outgoing HTTP requests carry cryptographic signatures verified by the central gateway.
+A red-lights automation must not fire because someone opened a settings screen. The listener:
+1. **Filters logcat on the device side** (`logcat -v time -b main -b events -b system -T 1 -e "EAlert|earthquake|…"`), so it only wakes up for relevant lines.
+2. **Ignores lifecycle lines** for activities that are closing (`onDestroy`, `onPause`, `onStop`, `finish`…).
+3. **Ignores the settings screens and the demo** (`EAlertSettings…`, `isTestAlert=true`). Use `--include-demo` to test the whole chain with Google's demo on purpose.
+4. **Confirms the alert is on screen**: it only forwards when `dumpsys activity top` shows `EAlertSafetyInfoActivity`; otherwise the line is discarded.
+5. **Signs every request** with HMAC-SHA256 (`X-Quake-Signature`), which the bridge verifies.
+
+## 7. Test it end to end
+
+```bash
+# Drill: the bridge forwards a level "drill" payload to your webhook
+DOCKER_CONTAINER=redroid-quake QUAKE_ALERT_URL=http://127.0.0.1:8990/android \
+  QUAKE_ANDROID_SECRET=... python3 android_alert_listener.py --drill
+
+# One-shot inspection of what is on screen right now (nothing is sent without QUAKE_ALERT_URL)
+DOCKER_CONTAINER=redroid-quake python3 android_alert_listener.py --once
+```
+
+If you capture a real alert, please [open an issue](https://github.com/Juanipis/quake-alert-listener/issues/new) with the (redacted) log lines: it would be the first confirmed capture.

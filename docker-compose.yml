@@ -13,7 +13,8 @@ services:
       QUAKE_NAME: "Base Station"
       QUAKE_WEBHOOK_URL: ""          # e.g. http://homeassistant.local:8123/api/webhook/quake_alert_local
       # QUAKE_WEBHOOK_SECRET: "change-me"     # HMAC-SHA256 signature in X-Quake-Signature
-      # QUAKE_SOURCES: "mcs,emsc,wolfx"
+      # QUAKE_SOURCES: "mcs,emsc,wolfx,usgs"  # default; in Colombia add sgc
+      # QUAKE_ANDROID_SECRET: "change-me"     # needed for POST /android (port-mapped requests aren't loopback)
       # QUAKE_NOTICE_MMI: "3.0"               # Android "Be Aware"
       # QUAKE_ALERT_MMI: "5.0"                # Android "Take Action"
       # QUAKE_SHAKE_UDP: "8888"

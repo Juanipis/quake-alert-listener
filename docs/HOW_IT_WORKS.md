@@ -2,21 +2,26 @@
 
 This is a walkthrough of what `quake_listener.py` actually does on the wire, what has been verified, and what has not. It is written for people who want to audit the code, extend it, or try to prove the Google path works.
 
-**Short version.** The bridge follows up to four push sources, works out what each quake means *at your base station*, and tells Home Assistant over a webhook.
+**Short version.** The bridge follows several earthquake sources, works out what each quake means *at your base station*, and tells Home Assistant over a webhook.
 
-| Source | Kind | Typical speed | Status |
-| :--- | :--- | :--- | :--- |
-| Official EEW via Wolfx (JMA, CENC, Sichuan, Fujian, Chongqing) | `eew` | seconds after origin | live |
-| Raspberry Shake UDP datacast + STA/LTA | `onsite` | seconds, on site | tested with synthetic signals |
-| EMSC SeismicPortal | `report` | minutes (measured ~6–8 min) | live |
-| Google MCS + AEAS decoder | `aeas` | would be seconds | experimental; never observed delivering ([why](#why-the-google-path-is-a-long-shot)) |
+| Source | `--sources` key | Kind | Typical speed | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| Official EEW via Wolfx (JMA, CENC, Sichuan, Fujian, Chongqing) | `wolfx` | `eew` | seconds after origin | live |
+| EMSC SeismicPortal (WebSocket) | `emsc` | `report` | minutes (measured ~6–8 min) | live |
+| USGS real-time feed (polled) | `usgs` | `report` | minutes | live |
+| Servicio Geológico Colombiano feed (polled) | `sgc` | `report` | minutes | live, opt-in |
+| Raspberry Shake UDP datacast + STA/LTA | `--shake-udp` | `onsite` | seconds, on site | tested with synthetic signals |
+| Real Android device via `android_alert_listener.py` | `POST /android` | `aeas` | seconds after Google alerts the device | running on one Raspberry Pi since Oct 2026; no real alert captured yet |
+| Google MCS socket + AEAS decoder | `mcs` | `aeas` | would be seconds | experimental research; never observed delivering ([why](#why-the-google-path-is-a-long-shot)) |
 
 ```mermaid
 flowchart LR
-    subgraph Push sources
+    subgraph Sources
       W[Wolfx all_eew<br/>JMA · CENC EEW]
       E[EMSC SeismicPortal]
+      U[USGS · SGC<br/>GeoJSON, HTTP 304]
       S[Raspberry Shake<br/>UDP datacast]
+      A[Android device / Redroid<br/>android_alert_listener.py]
       G[Google MCS<br/>mtalk.google.com:5228]
     end
     D[DetectionDesk<br/>intensity · S-wave ETA<br/>levels · dedupe]
@@ -24,19 +29,21 @@ flowchart LR
     WEB[Web console<br/>GET /status]
     W --> D
     E --> D
+    U --> D
     S -- STA/LTA trigger --> D
-    G -- AEAS stanza --> D
+    A -- POST /android, HMAC --> D
+    G -. AEAS stanza, never seen .-> D
     D -- JSON POST, optional HMAC --> HA
     D -- REST :8990 --> WEB
 ```
 
-Sections 1–4 cover the Google path in depth (it is the most involved protocol). Sections 5–7 cover the other sources and the desk that ties everything together.
+Sections 1–4 cover the Google path in depth: it is the most involved protocol and the least proven source. Sections 5–8 cover the sources that work today, the desk that ties everything together, and the API.
 
 ---
 
 ## 1. Getting an identity: checkin
 
-Before anything can log in to MCS, it needs an `android_id` and a `security_token`. The bridge gets them exactly the way Chrome's built-in GCM client does.
+Before anything can log in to MCS, it needs an `android_id` and a `security_token`. The bridge can check in with two profiles (see [Device profiles](#device-profiles-chrome-vs-android)); the default is `android`. This section walks through the `chrome` profile, which follows Chrome's built-in GCM client field by field.
 
 **Reference.** The implementation was checked field by field against Chromium's open-source client:
 - [`checkin.proto` / `android_checkin.proto`](https://source.chromium.org/chromium/chromium/src/+/main:google_apis/gcm/protocol/)
@@ -70,7 +77,7 @@ No locale, timezone or hardware identifiers are sent; Chrome doesn't send them e
 **Storage.** The identity is saved to `~/.quake_device_credentials.json` (or `--credentials-file`) with mode `0600`, together with the last checkin time, interval and digest.
 
 > [!IMPORTANT]
-> This identity is a **browser-type GCM client**. It is not an Android phone and has no Google Play services. It reports no location and is not registered (`register3`) with any sender or app; `/status` shows `"registrations": 0`. Keep that in mind for section 4.
+> Whatever the profile, this identity is not a real phone and runs no Google Play services. It reports no location and is not registered (`register3`) with any sender or app; `/status` shows `"registrations": 0`. Keep that in mind for section 4.
 
 ## 2. Logging in to MCS
 
@@ -173,18 +180,17 @@ payload
 The bridge supports two checkin device profiles via `--device-type {android,chrome}`:
 
 1. **Android Profile (`--device-type android`, default):**
-   - Emulates an authentic Google Pixel 6 (`google/oriole/oriole:14/UP1A.231005.007/10754064:user/release-keys`, GMS `240913000`, Android 14 SDK 34).
-   - Checkin request sends `DEVICE_ANDROID_OS` (1) with complete `AndroidBuildProto`, SIM/operator codes (`732101`), locale (`es_CO`) and timezone (`America/Bogota`).
+   - Announces a Pixel 6 build (`google/oriole/oriole:14/UP1A.231005.007/10754064:user/release-keys`, GMS `240913000`, Android 14 SDK 34).
+   - Checkin request sends `DEVICE_ANDROID_OS` (1) with an `AndroidBuildProto`, plus the locale and time zone from `--locale` / `--timezone` (default `en_US`, `UTC`). No carrier codes are sent.
    - Login packet authenticates as `android-34`.
 2. **Chrome Profile (`--device-type chrome`):**
    - Emulates Chromium's desktop GCM client with `DEVICE_CHROME_BROWSER` (3) and `chrome-120.0.6099.144`.
 
 > [!NOTE]
-> Google accepts both profiles with HTTP 200, assigning authentic `android_id` and `security_token`. Both profiles authenticate cleanly on `mtalk.google.com:5228` with ~80–120 ms round-trip latency.
+> Google accepts both profiles with HTTP 200 and assigns an `android_id` and `security_token`. Both log in to `mtalk.google.com:5228` and answer heartbeats with ~80–120 ms round-trips (last verified 2026-10-07).
 
-### 4. Reverse-Engineering Google AEAS & Cloud Geofencing
+### Why the Google path is a long shot
 
-### DEX Analysis of Google Play Services (`com.google.android.gms`)
 By decompiling the DEX bytecode (`classes13.dex` and `classes15.dex`) of Google Play Services (`com.google.android.gms`), the internal AEAS pipeline was mapped end-to-end:
 
 ```
@@ -203,49 +209,50 @@ By decompiling the DEX bytecode (`classes13.dex` and `classes15.dex`) of Google 
 1. **Inbound GCM Handler:** `com.google.android.location.quake.ealert.GcmReceiverChimeraService` processes incoming push stanzas from MCS.
 2. **Alert Model:** Decoded into `com.google.android.location.quake.ealert.ux.EAlertUxArgs`, matching the protobuf schema implemented in `decode_earthquake_payload()`.
 3. **Emergency UI Dispatch:** Automatically launches `com.google.android.location.settings.EAlertSafetyInfoActivity` with flags `FLAG_ACTIVITY_NEW_TASK | FLAG_ACTIVITY_NO_USER_ACTION`, bypassing Do Not Disturb and displaying the estimated arrival time of the S-wave.
-4. **The Root Cause of 0 Data Messages on Pure Sockets:**
+4. **Why a bare socket receives nothing:**
    Google AEAS is **not a global broadcast channel**. Google's cloud server only sends alert stanzas to devices that actively report location through Google's Fused Location Provider (`loc/m/api`) and Phenotype location beacons (`Ealert__location_interval_millis`).
    A standalone TCP client on `mtalk.google.com:5228` (whether Chrome or Android identity) does not transmit periodic Fused Location telemetry to Google's location reporting backend. Consequently, Google's server never matches a bare socket to any geographic earthquake polygon.
 
-### The Production Solution: Autonomous Micro-Android Sentinel (Redroid)
-To eliminate any dependence on a physical smartphone or a heavy desktop emulator running on a Mac/PC, the project supports running an **autonomous containerized Android 11 node (Redroid)** directly on the home server or Raspberry Pi 4:
+In short: the MCS client in this repo is a faithful, working implementation of the protocol, kept as a research tool (`--debug-frames`). It is not how you get Google's alerts.
 
-- **Image & Environment:** `redroid/redroid:11.0.0_gapps` running containerized on Linux with BinderFS (`/dev/binderfs`) and Kernel PSI (`psi=1`).
-- **Debloated Runtime:** UI launcher (`Launcher3`), Play Store (`vending`), and live wallpapers are disabled, stabilizing idle CPU usage at **~1.7%** on a Raspberry Pi 4.
-- **Location Anchor:** A persistent mock location foreground service (`com.lexa.fakegps`) injects exact base station coordinates into both `gps` and `network` providers, keeping Google Play Services perpetually geolocated at your home.
-- **Real-Time Sentinel Listener (`android_alert_listener.py`):**
-  - Streams Android kernel logcat events in real time via `docker exec redroid-quake logcat -v time -b main -b events -b system -T 1 -e "EAlert|sismo|earthquake|..."`.
-  - Achieves **<10 ms latency** and 0.0% CPU overhead at idle.
-  - **Zero-False-Alarm Protection:** Ignores lifecycle exit events (`onDestroy`, `onPause`, `finish`), ignores configuration demos (`isTestAlert=true`, `EAlertSettings`), and verifies with `dumpsys activity top` before dispatching. If the screen is not active, events are discarded safely without triggering false alarms.
-  - Signs payloads with HMAC-SHA256 (`X-Quake-Signature`) and posts to `:8990/android`.
+### The workaround: a real Android device (optional)
+
+If Google only alerts devices that report a location, the way in is a device that does. `android_alert_listener.py` watches one and forwards what it shows:
+
+- **Device.** Either a phone connected over ADB, or a containerized Android 11 (Redroid, `redroid/redroid:11.0.0_gapps`) on a Linux host with BinderFS and PSI. The Redroid image needs Google Play services and a mock-location app to pin it to your base station.
+- **Cost.** Debloated (launcher, Play Store and live wallpapers disabled), the container idles at about 2 % CPU on a Raspberry Pi 4 (measured 1.7–1.9 %). It is an Android system, not a Python script: plan for its RAM and storage.
+- **Capture.** The listener follows a filtered `logcat` stream (no polling). When an `EAlert` line appears it confirms that `EAlertSafetyInfoActivity` is really in front with `dumpsys activity top`, reads `EAlertUxArgs` (magnitude, epicenter, distance), and posts it to `POST /android`, signed with HMAC-SHA256.
+- **False-alarm guards.** Lifecycle lines (`onPause`, `onDestroy`, `finish`…), the settings screens (`EAlertSettings…`) and Google's demo alert (`isTestAlert=true`) are ignored.
+- **Timing.** The alert does not include its origin time, so the bridge sends no S-wave countdown for it rather than one that would be too long.
+- **Status.** Running 24/7 on one Raspberry Pi 4 in Colombia since 2026-10-07. It has seen and correctly ignored Google's settings demo. It has **not yet captured a real earthquake alert**, and whether Google alerts a mock-located container at all is still unproven.
 
 See [docs/REDROID_SENTINEL.md](REDROID_SENTINEL.md) for the complete step-by-step setup guide.
 
 ---
 
-### 5. Multilayer Redundancy: Official Geological Feeds (SGC & USGS)
+## 5. Sources that work today
 
-In addition to Google AEAS, production deployments can run a multilayer polling strategy for official scientific agencies:
+### 5a. USGS and SGC (polled agency feeds)
 
-1. **SGC (Servicio Geológico Colombiano):**
-   - Polling endpoint: `https://archive.sgc.gov.co/feed/v1.0.1/summary/five_days_all.json` every 15 seconds.
-   - User-Agent header customized to pass CloudFront edge filters.
-2. **USGS (United States Geological Survey):**
-   - Polling endpoint: `https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson` every 60 seconds.
-3. **Zero-Bandwidth Conditional Caching:**
-   - All requests send `If-None-Match: <ETag>` and `If-Modified-Since: <Last-Modified>`.
-   - Returns **HTTP 304 Not Modified** (0 payload bytes) when no new events have occurred, consuming near-zero network bandwidth and host CPU.
-4. **Intensity Engine (Atkinson, Worden & Wald 2014):**
-   - For every reported hypocenter, local ground shaking at the base station is computed:
-     $$\text{MMI} = 0.309 + 1.864 \cdot M - 1.672 \cdot \log_{10}(R) - 0.00219 \cdot R + 1.77 \cdot B - 0.383 \cdot M \cdot \log_{10}(R)$$
-   - Events are automatically categorized as `notice` (MMI ≥ 2.5) or `alert` (MMI ≥ 3.5).
-5. **Unified Incident Fusion:**
-   - If Google AEAS fires first, the alarm sounds immediately.
-   - When SGC/USGS subsequently publishes the reviewed seismic solution (with official magnitude, depth, and epicentral coordinates), the system links the event IDs and updates Home Assistant without re-triggering duplicate nuisance alarms.
+Neither agency offers a push channel, so the bridge polls their public GeoJSON feeds:
 
----
+| Key | Feed | Every | Coverage |
+|---|---|---|---|
+| `usgs` (default) | `earthquake.usgs.gov/.../summary/all_hour.geojson` | 60 s (the feed is regenerated every minute) | worldwide; dense in the US |
+| `sgc` (opt-in) | `archive.sgc.gov.co/feed/v1.0.1/summary/five_days_all.json` | 30 s | Colombia and surroundings |
 
-### 5a. EMSC (worldwide rapid reports)
+**Conditional requests.** Every poll sends `If-None-Match` and `If-Modified-Since`. While nothing changes the server answers `304 Not Modified` with an empty body, so an idle feed costs one small request per interval. Both servers were checked to honour this on 2026-10-07.
+
+**Only what changed.** The bridge remembers each event's `updated` value, so only new or revised events reach the desk. The SGC feed lists five days of quakes; anything older than 15 minutes is skipped.
+
+**Quirks handled.**
+- The SGC feed puts coordinates in `[lat, lon, depth]` order, unlike GeoJSON's `[lon, lat, depth]`.
+- SGC `utcTime` has minute precision (`YYYY-MM-DD HH:MM`), so SGC reports never carry a meaningful countdown; they arrive minutes later anyway.
+- The SGC server returns `403` unless the `User-Agent` starts with `Mozilla/`; the bridge sends `Mozilla/5.0 (compatible; quake-alert-listener/<version>; +<repo URL>)`.
+
+When your base station is inside Colombia and `sgc` is not enabled, the bridge suggests it at startup.
+
+### 5b. EMSC (worldwide rapid reports)
 
 [EMSC's SeismicPortal](https://www.seismicportal.eu/realtime.html) pushes every new or revised earthquake worldwide. The data is licensed CC BY 4.0.
 
@@ -268,9 +275,9 @@ In addition to Google AEAS, production deployments can run a multilayer polling 
 
 **What we measured.** In a 2.5-minute sample on 2026-10-07, six real events arrived, between about 6 and 8 minutes after their origin times. That is too late for early warning, but useful to log the event, notify your phone, or check on the house afterwards.
 
-Disable it with `--no-emsc` or `--sources mcs,wolfx`.
+Disable it with `--no-emsc`, or list only the sources you want in `--sources`.
 
-### 5b. Official early warnings via Wolfx (Japan, mainland China)
+### 5c. Official early warnings via Wolfx (Japan, mainland China)
 
 [Wolfx](https://wolfx.jp) is an independent public-interest project. It relays official earthquake early warnings as JSON over WebSocket.
 
@@ -292,7 +299,7 @@ Disable it with `--no-emsc` or `--sources mcs,wolfx`.
 
 **Behaviour.** An EEW is issued seconds after the quake starts and revised several times as more stations report. The desk notifies on the first revision that reaches your threshold, and again only if a later revision makes it worse. Training messages are ignored, and a cancellation of something you were told about is passed on as `level: "cancel"`.
 
-### 5c. On-site detection with a Raspberry Shake
+### 5d. On-site detection with a Raspberry Shake
 
 Where no agency publishes EEW, the only true early warning is detecting the P-wave yourself.
 
@@ -311,7 +318,7 @@ Where no agency publishes EEW, the only true early warning is detecting the P-wa
 
 ## 6. The detection desk
 
-All four sources produce the same *event* shape:
+All sources produce the same *event* shape:
 - `source`, `kind`, `event_id`, `revision`;
 - `origin_ts`, `lat`, `lon`, `depth_km`;
 - `magnitude`, `region`;
@@ -346,9 +353,9 @@ All four sources produce the same *event* shape:
 - the level goes up, or
 - the estimated MMI rises by at least 1.
 
-So an EEW, its revisions and the EMSC report a few minutes later produce one notification, plus an escalation if the quake turns out bigger. A cancelled EEW that had been announced produces a `cancel` payload.
+So an EEW, its revisions and the EMSC, USGS and SGC reports a few minutes later produce one notification, plus an escalation if the quake turns out bigger. A cancelled EEW that had been announced produces a `cancel` payload.
 
-
+**Forced levels.** An alert posted to `/android` carries Google's own level (`alert` for "Take Action", `notice` for "Be Aware"), which the desk keeps as a minimum. Because it has no origin time, it can't be matched with the agency reports that follow, so those may produce a second notification for the same quake.
 
 ## 7. What reaches Home Assistant
 
@@ -357,7 +364,7 @@ Every source produces the same JSON. These are the fields (synthetic values):
 | Field | Example | Notes |
 |---|---|---|
 | `level` / `nivel` | `alert` / `alerta` | `notice`·`aviso`, `alert`·`alerta`, `cancel`·`cancelado`, `drill`·`simulacro` |
-| `status` | `early warning` | `early warning` (EEW), `rapid report` (EMSC), `on-site trigger`, `early alert` (AEAS), `cancelled` |
+| `status` | `early warning` | `early warning` (EEW), `rapid report` (EMSC, USGS, SGC), `on-site trigger`, `early alert` (Android / AEAS), `cancelled` |
 | `source`, `kind` | `JMA EEW`, `eew` | `kind` is `eew` · `report` · `onsite` · `aeas` |
 | `id`, `event_id`, `revision`, `final` | `eew-jma_eew:…`, `…`, `3`, `false` | Revision / final flags as given by the agency |
 | `magnitude` / `magnitud`, `magnitude_type` | `6.1` | |
@@ -369,7 +376,7 @@ Every source produces the same JSON. These are the fields (synthetic values):
 | `p_wave_arrival_ts`, `s_wave_arrival_ts`, `s_wave_eta_s` | epoch, epoch, `9.8` | Countdown to strong shaking; `null` when unknown |
 | `radius_km` | `90` | AEAS impact circle only |
 | `place` / `lugar` | `M6.1 · Test Region · 42.3 km from Base Station · est. MMI V · S-wave in 9 s` | Ready to show or speak |
-| `url`, `timestamp` / `hora_local` | | Event page (EMSC); local time the payload was built |
+| `url`, `timestamp` / `hora_local` | | Event page (EMSC, USGS); local time the payload was built |
 
 **Signing.** With `--webhook-secret`, the body is signed with HMAC-SHA256. The signature is sent in both `X-Quake-Signature` and `X-Sismo-Firma`.
 
@@ -379,15 +386,18 @@ Every source produces the same JSON. These are the fields (synthetic values):
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/status` (also `/`, `/api/status`) | GET | Telemetry for every source (`google_mcs`, `sources.emsc/wolfx/shake`), thresholds, last quake, recent logs |
+| `/status` (also `/`, `/api/status`) | GET | `status` (`online` when any source is connected), `sources_online`, telemetry for every source (`google_mcs`, `sources.emsc/wolfx/usgs/sgc/shake/android`), thresholds, last quake, recent logs |
 | `/ping` | GET or POST | Ping MCS through the listener thread; returns `latency_ms` |
 | `/drill` (also `/simulacro`) | POST | Send a drill payload to your webhook |
+| `/android` (also `/api/android`) | POST | Alert from a real Android device (`android_alert_listener.py`); see below |
 
 The API defends itself on three levels:
 
 - **Binding.** The server listens on `127.0.0.1` by default, or on `0.0.0.0` automatically inside a container. Use `--http-host 0.0.0.0` to reach it from another machine.
 - **Browser origins.** Only the official page and `localhost` pages get CORS headers. Other origins get `403` on `/ping` and `/drill` (`--allowed-origins`). Clients that send no `Origin` header, such as curl or Home Assistant, are not affected.
 - **DNS rebinding.** Requests whose `Host` header is a foreign domain name are refused (`--allowed-hosts`). IPs, `localhost` and this machine's hostname always work.
+
+**`POST /android`.** This endpoint can turn the lights red, so it has its own rule. With `--android-secret` (or `QUAKE_ANDROID_SECRET`; it falls back to `--webhook-secret`), every request must carry `X-Quake-Signature`, the hex HMAC-SHA256 of the raw body. Without any secret, only clients on the same machine (loopback) are accepted; a request from another address gets `403`. Behind Docker's port mapping, requests arrive from the bridge network, not loopback, so set a secret there.
 
 ## 9. Research it yourself
 
@@ -400,6 +410,9 @@ python3 quake_listener.py --simulate
 
 # Follow only the official early warnings and EMSC, with stricter thresholds
 python3 quake_listener.py --sources wolfx,emsc --notice-mmi 3.5 --alert-mmi 5.5
+
+# Colombia: add the SGC feed (and USGS) to the defaults
+python3 quake_listener.py --lat 4.71 --lon -74.07 --sources mcs,emsc,wolfx,usgs,sgc
 
 # Run the offline test suite
 python3 -m unittest discover -s tests -v
