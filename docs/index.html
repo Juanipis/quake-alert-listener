@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Quake MCS Listener — earthquake alerts for Home Assistant</title>
-  <meta name="description" content="A single Python file that listens to the Android Earthquake Alerts push channel and turns alerts into Home Assistant webhooks. Zero dependencies, under 15 MB of RAM.">
+  <meta name="description" content="A single Python file that follows official earthquake early warnings, EMSC, USGS and SGC feeds and your own seismometer, and tells Home Assistant how hard it will shake at your place. Zero dependencies.">
   <meta name="theme-color" content="#030712">
   <link rel="icon" type="image/svg+xml" href="logo.svg">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -12,7 +12,7 @@
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="Quake MCS Listener">
-  <meta property="og:description" content="Earthquake early-warning pushes, straight into Home Assistant. Pure Python, zero dependencies, under 15 MB of RAM.">
+  <meta property="og:description" content="Earthquake warnings with local intensity and an S-wave countdown, straight into Home Assistant. Pure Python, zero dependencies.">
   <meta property="og:url" content="https://juanipis.github.io/quake-alert-listener/">
   <meta property="og:image" content="https://juanipis.github.io/quake-alert-listener/og.png">
   <meta name="twitter:card" content="summary_large_image">
@@ -678,7 +678,7 @@
         <h1>Earthquake warnings, <span class="soft">straight into your smart home.</span></h1>
         <p class="lede">
           One Python file that follows official early warnings, a worldwide quake feed and your own seismometer,
-          then tells <b>Home Assistant</b> how hard it will shake at your place and how many seconds you have. No <span class="mono">pip install</span>, under 15&nbsp;MB of RAM.
+          then tells <b>Home Assistant</b> how hard it will shake at your place and how many seconds you have. No <span class="mono">pip install</span>, about 30&nbsp;MB of RAM.
         </p>
 
         <div class="install card" id="install">
@@ -704,7 +704,7 @@
 
         <dl class="specs">
           <div><dt>Dependencies</dt><dd>0</dd></div>
-          <div><dt>Memory</dt><dd>&lt;15 MB</dd></div>
+          <div><dt>Memory</dt><dd>~30 MB</dd></div>
           <div><dt>CPU idle</dt><dd>~0%</dd></div>
           <div><dt>Python</dt><dd>3.8+</dd></div>
         </dl>
@@ -712,7 +712,7 @@
 
       <div class="card scope reg" aria-label="Live seismograph">
         <div class="card-h">
-          <span class="label"><svg class="i"><use href="#i-wave"/></svg>Seismograph · MCS stream</span>
+          <span class="label"><svg class="i"><use href="#i-wave"/></svg>Seismograph · bridge traffic</span>
           <span class="chip" id="scope-chip" data-tone="amber"><span class="led"></span><span>Simulated</span></span>
         </div>
         <div class="scope-hud">
@@ -721,9 +721,9 @@
           <div><span class="k">Amplitude</span><span class="v" id="hud-amp">0.00</span></div>
           <div><span class="k">Last packet</span><span class="v" id="hud-last">—</span></div>
         </div>
-        <canvas id="scope" role="img" aria-label="Two scrolling traces, P-wave and S-wave, that jump whenever a packet arrives from Google's push server."></canvas>
+        <canvas id="scope" role="img" aria-label="Two decorative scrolling traces that jump whenever the bridge hears a heartbeat or a feed event."></canvas>
         <div class="scope-foot">
-          <span>Every packet from <span class="mono">mtalk.google.com</span> moves the needle.</span>
+          <span>Every heartbeat and feed event the bridge hears moves the needle (a visualization, not seismic data).</span>
           <span class="mono" id="hud-events">0 events</span>
         </div>
       </div>
@@ -736,7 +736,7 @@
           <p class="kicker">01 / Live bridge</p>
           <h2>Everything the bridge hears, in plain sight.</h2>
         </div>
-        <p>Without a bridge running, this page plays simulated traffic so you can poke around. Start the command above and it switches to your real MCS connection within a couple of seconds.</p>
+        <p>Without a bridge running, this page plays simulated traffic so you can poke around. Start the command above and it switches to your bridge's real traffic within a couple of seconds.</p>
       </div>
 
       <div class="bento">
@@ -973,12 +973,12 @@
           <p>Each feed is honest about what it can do. The bridge notifies once per quake and only again if it gets worse.</p>
         </div>
         <div class="src-grid">
-          <div class="src"><span class="src-k ok">live</span><h4>Google AEAS Sentinel</h4><p>Headless micro-Android container (Redroid) streaming kernel logcat with zero false alarms.</p><dl><dt>Speed</dt><dd>&lt;10 ms</dd><dt>Where</dt><dd>Global (any base station)</dd></dl></div>
-          <div class="src"><span class="src-k ok">live</span><h4>Google MCS Socket</h4><p>Direct TLS binary protocol client connected to mtalk.google.com:5228 with Android 14 checkin.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Global (mtalk)</dd></dl></div>
-          <div class="src"><span class="src-k ok">live</span><h4>Official EEW (Wolfx)</h4><p>JMA and CENC alerts relayed by Wolfx, revised as the quake grows.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Japan, mainland China</dd></dl></div>
-          <div class="src"><span class="src-k ok">live</span><h4>Geological Feeds</h4><p>Official reviewed solutions from SGC &amp; USGS with zero-bandwidth HTTP 304 conditional caching.</p><dl><dt>Speed</dt><dd>seconds to min</dd><dt>Where</dt><dd>Americas &amp; Global</dd></dl></div>
-          <div class="src"><span class="src-k ok">ready</span><h4>Your own sensor</h4><p>A Raspberry Shake streams over UDP; an STA/LTA trigger catches the P-wave on site.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Anywhere</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>Official EEW (Wolfx)</h4><p>JMA and CENC early warnings relayed by Wolfx, revised as the quake grows.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Japan, mainland China</dd></dl></div>
           <div class="src"><span class="src-k ok">live</span><h4>EMSC reports</h4><p>Every new or revised quake worldwide over a public WebSocket, CC BY 4.0.</p><dl><dt>Speed</dt><dd>~6–8 min</dd><dt>Where</dt><dd>Worldwide</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>USGS &amp; SGC feeds</h4><p>USGS worldwide and Colombia's SGC catalogue, polled with HTTP 304 caching so an idle feed costs almost nothing.</p><dl><dt>Speed</dt><dd>minutes</dd><dt>Where</dt><dd>Worldwide · Colombia</dd></dl></div>
+          <div class="src"><span class="src-k ok">ready</span><h4>Your own sensor</h4><p>A Raspberry Shake streams over UDP; an STA/LTA trigger catches the P-wave on site. Tested with synthetic signals.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Anywhere</dd></dl></div>
+          <div class="src"><span class="src-k wait">trial</span><h4>Android sentinel</h4><p>Optional: a real or containerized Android forwards Google's alert to the bridge. Running since Oct 2026; no real alert captured yet.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Where Google alerts</dd></dl></div>
+          <div class="src"><span class="src-k wait">research</span><h4>Google MCS socket</h4><p>A working client for Google's push protocol. Google doesn't alert a bare socket, so it is kept for research.</p><dl><dt>Speed</dt><dd>n/a</dd><dt>Where</dt><dd>mtalk:5228</dd></dl></div>
         </div>
       </div>
     </section>
@@ -989,19 +989,19 @@
         <div>
           <p class="kicker" style="color:var(--amber)">03 / Where it stands</p>
           <h2>Honest status: early warnings where they exist.</h2>
-          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you on-site P-wave triggers. EMSC covers the globe. For Google AEAS, we reverse-engineered the MCS wire protocol and solved Google's cloud geofencing with an autonomous containerized Android sentinel (Redroid) running directly on Linux/RPi with zero false alarms. Estimates follow Atkinson, Worden &amp; Wald (2014) and Allen et al. (2012).</p>
+          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you on-site P-wave triggers anywhere. EMSC, USGS and SGC report every quake minutes later. Google's alerts are the open question: the push protocol works, but Google only alerts devices that report a location, so an optional Android container now watches for them; it has not caught a real quake yet. Intensities follow Allen, Wald &amp; Worden (2012).</p>
           <div class="status-ctas">
             <a class="btn btn-primary" href="https://github.com/Juanipis/quake-alert-listener/issues/new" target="_blank" rel="noopener">Report what you see</a>
             <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Read the code</a>
           </div>
         </div>
         <ul class="checks">
-          <li><svg class="i ok"><use href="#i-check"/></svg>Google AEAS Sentinel (Redroid)<span>&lt;10 ms operational</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Google MCS Protocol (mtalk:5228)<span>live (~500 ms)</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>Official EEW feed (JMA, CENC)<span>live</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Official Geological feeds (SGC, USGS)<span>live (HTTP 304)</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>EMSC worldwide feed<span>live</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>39 tests passing</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>EMSC, USGS and SGC feeds<span>live</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>50 tests passing</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Raspberry Shake trigger<span>synthetic signals</span></li>
+          <li><svg class="i wait"><use href="#i-check"/></svg>Android sentinel (Redroid)<span>no real alert yet</span></li>
+          <li><svg class="i wait"><use href="#i-check"/></svg>Google MCS socket<span>research only</span></li>
         </ul>
       </div>
     </section>
@@ -1016,7 +1016,7 @@
         <a href="https://github.com/Juanipis/quake-alert-listener/issues" target="_blank" rel="noopener">Issues</a>
       </nav>
       <p class="legal">
-        Independent, non-profit open-source project for home automation and civil protection research. Not affiliated with, endorsed by or sponsored by Google LLC. Android and Google are trademarks of their respective owners. Built with Google Antigravity, Gemini 3.8 Flash and Claude Opus 5.5. Map tiles © Esri and OpenStreetMap contributors. Earthquake reports © EMSC (seismicportal.eu), CC BY 4.0. Early warnings relayed by Wolfx (wolfx.jp) from JMA and CENC. Intensity model: Allen, Wald &amp; Worden (2012).
+        Independent, non-profit open-source project for home automation and civil protection research. Not affiliated with, endorsed by or sponsored by Google LLC. Android and Google are trademarks of their respective owners. Built with Google Antigravity, Gemini 3.8 Flash and Claude Opus 5.5. Map tiles © Esri and OpenStreetMap contributors. Earthquake reports © EMSC (seismicportal.eu), CC BY 4.0; USGS (public domain); Servicio Geológico Colombiano. Early warnings relayed by Wolfx (wolfx.jp) from JMA and CENC. Intensity model: Allen, Wald &amp; Worden (2012).
       </p>
     </div>
   </footer>
@@ -1489,6 +1489,7 @@
         det: d.total_detections | 0,
         emsc: (d.emsc && d.emsc.events_received) | 0,
         eew: (d.sources && d.sources.wolfx && d.sources.wolfx.events_received) | 0,
+        polled: ['usgs', 'sgc'].reduce((n, k) => n + ((d.sources && d.sources[k] && d.sources[k].events_received) | 0), 0),
       };
       if (g.latency_ms != null && g.latency_ms !== state.latHist[state.latHist.length - 1]) setLatency(g.latency_ms);
       if (state.prev) {
@@ -1496,6 +1497,7 @@
         if (cur.msgs > state.prev.msgs) pulse('data', 'DATA');
         if (cur.emsc > state.prev.emsc) pulse('data', 'EMSC');
         if (cur.eew > state.prev.eew) pulse('data', 'EEW');
+        if (cur.polled > state.prev.polled) pulse('data', 'REPORT');
         if (cur.det > state.prev.det && Date.now() > state.suppressQuakeUntil) onQuake(d.last_quake || {});
       }
       state.prev = cur;
@@ -1509,13 +1511,13 @@
           ? 'Local clock differs from Google time; countdowns are corrected. Enable NTP.' : 'Anonymous device ID and clock offset vs Google';
       }
       const src = d.sources || (d.emsc ? { emsc: d.emsc } : {});
-      const names = { wolfx: 'EEW', emsc: 'EMSC', shake: 'Shake' };
+      const names = { wolfx: 'EEW', emsc: 'EMSC', usgs: 'USGS', sgc: 'SGC', shake: 'Shake', android: 'Android' };
       const on = [], off = [];
       Object.keys(names).forEach((k) => {
         if (!src[k] || !src[k].enabled) return;
         (src[k].connected ? on : off).push(names[k]);
       });
-      (g.connected ? on : off).push('MCS');
+      if (g.enabled !== false) (g.connected ? on : off).push('MCS');
       $('#st-feeds').innerHTML = `${on.length}<small>/${on.length + off.length}</small>`;
       $('#st-feeds-sub').textContent = on.join(' · ') + (off.length ? ` · ${off.join(', ')} down` : '');
       if (g.last_packet_ts) $('#hud-last').textContent = new Date(g.last_packet_ts * 1000).toTimeString().slice(0, 8);

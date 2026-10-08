@@ -1115,6 +1115,7 @@ STATE = {
         "lon": 0.0
     },
     "google_mcs": {
+        "enabled": False,
         "connected": False,
         "conectado": False,
         "android_id": None,
@@ -2529,6 +2530,11 @@ def _is_loopback_client(addr):
     return ip.is_loopback or bool(mapped and mapped.is_loopback)
 
 
+# Files of the web console the bridge serves next to docs/index.html (fixed allow-list)
+STATIC_DOCS = {"logo.svg": "image/svg+xml", "favicon-32.png": "image/png",
+               "icon-180.png": "image/png", "og.png": "image/png"}
+
+
 class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
     server_version = f"QuakeListener/{__version__}"
     timeout = 15  # drop clients that stall mid-request
@@ -2586,6 +2592,30 @@ class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
             path = path.rstrip("/")
         return path
 
+    def _serve_doc(self, name):
+        """Serve one file of the local web console (docs/) if this copy has it."""
+        candidates = [os.path.join(os.getcwd(), "docs", name)]
+        script_dir = _script_dir()
+        if script_dir:
+            candidates.insert(0, os.path.join(script_dir, "docs", name))
+        for c in candidates:
+            if not os.path.isfile(c):
+                continue
+            try:
+                with open(c, "rb") as f:
+                    body = f.read()
+            except OSError:
+                continue
+            self.send_response(200)
+            self.send_cors_headers()
+            self.send_header("Content-Type", STATIC_DOCS.get(name, "text/html; charset=utf-8"))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+            return True
+        return False
+
     def _handle_ping(self):
         client = GLOBAL_CLIENT
         lat, error = None, None
@@ -2609,26 +2639,10 @@ class QuakeHTTPHandler(http.server.BaseHTTPRequestHandler):
         if not self._host_ok():
             return
         clean_path = self._clean_path()
-        if clean_path in ("/", "/index.html"):
-            # If docs/index.html exists locally, serve the full dashboard
-            candidates = [os.path.join(os.getcwd(), "docs", "index.html")]
-            script_dir = _script_dir()
-            if script_dir:
-                candidates.insert(0, os.path.join(script_dir, "docs", "index.html"))
-            for c in candidates:
-                if os.path.isfile(c):
-                    try:
-                        with open(c, "rb") as f:
-                            html_bytes = f.read()
-                        self.send_response(200)
-                        self.send_cors_headers()
-                        self.send_header("Content-Type", "text/html; charset=utf-8")
-                        self.send_header("Content-Length", str(len(html_bytes)))
-                        self.end_headers()
-                        self.wfile.write(html_bytes)
-                        return
-                    except OSError:
-                        pass
+        if clean_path in ("/", "/index.html") and self._serve_doc("index.html"):
+            return
+        if clean_path.lstrip("/") in STATIC_DOCS and self._serve_doc(clean_path.lstrip("/")):
+            return
 
         if clean_path in ("/", "/status", "/api/status"):
             self._send_json(200, status_snapshot())
@@ -2969,6 +2983,7 @@ def run_listener(args):
         f"Webhook: {redact_url(args.webhook_url) if args.webhook_url else 'Disabled'}"
         f"{' (HMAC signed)' if args.webhook_url and args.webhook_secret else ''}")
 
+    _update_mcs_state(enabled="mcs" in args.sources)
     with STATE_LOCK:
         STATE["thresholds"] = {"notice_mmi": args.notice_mmi, "alert_mmi": args.alert_mmi,
                                "min_magnitude": args.min_magnitude, "max_distance_km": args.max_distance_km}

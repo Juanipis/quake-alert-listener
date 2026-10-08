@@ -538,6 +538,14 @@ class HttpApi(unittest.TestCase):
         self.assertEqual(set(body["sources"]), {"emsc", "wolfx", "usgs", "sgc", "shake", "android"})
         self.assertIn("sources_online", body)
 
+    def test_serves_only_known_doc_files(self):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/logo.svg")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            self.assertEqual(r.headers["Content-Type"], "image/svg+xml")
+            self.assertIn(b"<svg", r.read())
+        self.assertEqual(self.get("/../quake_listener.py")[0], 404)
+        self.assertEqual(self.get("/README.md")[0], 404)
+
     def test_guards(self):
         self.assertEqual(self.get("/status", {"Host": "attacker.example"})[0], 403)
         self.assertEqual(self.get("/drill", {"Origin": "https://attacker.example"}, "POST")[0], 403)

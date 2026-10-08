@@ -17,7 +17,7 @@ $ErrorActionPreference = "Stop"
 Write-Host ""
 Write-Host "===================================================================" -ForegroundColor Cyan
 Write-Host "  🌍 Quake MCS Listener • Real-Time Earthquake Bridge (Windows)" -ForegroundColor Cyan
-Write-Host "  Lightweight autonomous client connected to Google MCS (mtalk:5228)" -ForegroundColor Cyan
+Write-Host "  Early warnings, quake feeds and your own sensor -> Home Assistant" -ForegroundColor Cyan
 Write-Host "===================================================================" -ForegroundColor Cyan
 Write-Host ""
 

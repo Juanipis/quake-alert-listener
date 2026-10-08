@@ -137,7 +137,7 @@ The image (~55 MB, Alpine):
 python3 -m unittest discover -s tests -v   # offline, standard library only
 ```
 
-49 tests cover the Google MCS protocol (checkin layout, login, stream acks, idle replies, port fallback), protobuf decoding, the intensity model, each agency's time format, the USGS/SGC parsers and conditional requests, the detection policy (levels, escalation, cross-source dedupe, cancellations), WebSocket framing including hostile peers, the STA/LTA trigger, and the HTTP guards including `/android` signatures. CI runs them on Python 3.8, 3.10, 3.12 and 3.13.
+50 tests cover the Google MCS protocol (checkin layout, login, stream acks, idle replies, port fallback), protobuf decoding, the intensity model, each agency's time format, the USGS/SGC parsers and conditional requests, the detection policy (levels, escalation, cross-source dedupe, cancellations), WebSocket framing including hostile peers, the STA/LTA trigger, and the HTTP guards including `/android` signatures. CI runs them on Python 3.8, 3.10, 3.12 and 3.13.
 
 ---
 

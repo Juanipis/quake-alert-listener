@@ -18,7 +18,7 @@ trap TRAP_CLEANUP EXIT INT TERM
 echo ""
 echo "==================================================================="
 echo "  🌍 Quake MCS Listener • Real-Time Earthquake Bridge"
-echo "  Lightweight autonomous client connected to Google MCS (mtalk:5228)"
+echo "  Early warnings, quake feeds and your own sensor -> Home Assistant"
 echo "==================================================================="
 echo ""
 
