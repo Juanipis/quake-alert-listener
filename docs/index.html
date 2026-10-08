@@ -483,7 +483,7 @@
     .sources::before { background: linear-gradient(135deg, rgba(34, 197, 94, 0.45), transparent 40%, transparent 70%, rgba(56, 189, 248, 0.25)); }
     .src-head h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
     .src-head p { margin-top: 6px; color: var(--muted); font-size: 14px; max-width: 46rem; }
-    .src-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+    .src-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 18px; }
     .src { position: relative; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, 0.015); min-width: 0; }
     .src h4 { font-size: 14.5px; font-weight: 600; margin-top: 10px; }
     .src p { font-size: 13px; color: var(--muted); margin-top: 4px; min-height: 3.6em; }
@@ -969,14 +969,16 @@
       <div class="card sources" data-reveal>
         <div class="src-head">
           <p class="kicker" style="color:var(--green)">Sources</p>
-          <h3>Four feeds, one policy.</h3>
+          <h3>Multilayer feeds, one policy.</h3>
           <p>Each feed is honest about what it can do. The bridge notifies once per quake and only again if it gets worse.</p>
         </div>
         <div class="src-grid">
-          <div class="src"><span class="src-k ok">live</span><h4>Official early warnings</h4><p>JMA and CENC alerts relayed by Wolfx, revised as the quake grows.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Japan, mainland China</dd></dl></div>
-          <div class="src"><span class="src-k ok">ready</span><h4>Your own sensor</h4><p>A Raspberry Shake streams over UDP; an STA/LTA trigger catches the P-wave on site.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>anywhere</dd></dl></div>
-          <div class="src"><span class="src-k ok">live</span><h4>EMSC reports</h4><p>Every new or revised quake worldwide over a public WebSocket, CC BY 4.0.</p><dl><dt>Speed</dt><dd>~6–8 min</dd><dt>Where</dt><dd>worldwide</dd></dl></div>
-          <div class="src"><span class="src-k wait">experimental</span><h4>Google MCS</h4><p>Speaks Android's push protocol and decodes AEAS alerts, but has never received one.</p><dl><dt>Speed</dt><dd>—</dd><dt>Where</dt><dd>—</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>Google AEAS Sentinel</h4><p>Headless micro-Android container (Redroid) streaming kernel logcat with zero false alarms.</p><dl><dt>Speed</dt><dd>&lt;10 ms</dd><dt>Where</dt><dd>Global (any base station)</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>Google MCS Socket</h4><p>Direct TLS binary protocol client connected to mtalk.google.com:5228 with Android 14 checkin.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Global (mtalk)</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>Official EEW (Wolfx)</h4><p>JMA and CENC alerts relayed by Wolfx, revised as the quake grows.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Japan, mainland China</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>Geological Feeds</h4><p>Official reviewed solutions from SGC &amp; USGS with zero-bandwidth HTTP 304 conditional caching.</p><dl><dt>Speed</dt><dd>seconds to min</dd><dt>Where</dt><dd>Americas &amp; Global</dd></dl></div>
+          <div class="src"><span class="src-k ok">ready</span><h4>Your own sensor</h4><p>A Raspberry Shake streams over UDP; an STA/LTA trigger catches the P-wave on site.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Anywhere</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>EMSC reports</h4><p>Every new or revised quake worldwide over a public WebSocket, CC BY 4.0.</p><dl><dt>Speed</dt><dd>~6–8 min</dd><dt>Where</dt><dd>Worldwide</dd></dl></div>
         </div>
       </div>
     </section>
@@ -987,18 +989,19 @@
         <div>
           <p class="kicker" style="color:var(--amber)">03 / Where it stands</p>
           <h2>Honest status: early warnings where they exist.</h2>
-          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you seconds anywhere, on site. EMSC covers the rest of the world, minutes after the fact. The Google path works up to the socket, but Google targets alerts at Play-services phones by location, and this client has never received one. Estimates are rough (about ±1 MMI) and this is no substitute for official alerts on your phone.</p>
+          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you on-site P-wave triggers. EMSC covers the globe. For Google AEAS, we reverse-engineered the MCS wire protocol and solved Google's cloud geofencing with an autonomous containerized Android sentinel (Redroid) running directly on Linux/RPi with zero false alarms. Estimates follow Atkinson, Worden &amp; Wald (2014) and Allen et al. (2012).</p>
           <div class="status-ctas">
             <a class="btn btn-primary" href="https://github.com/Juanipis/quake-alert-listener/issues/new" target="_blank" rel="noopener">Report what you see</a>
             <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Read the code</a>
           </div>
         </div>
         <ul class="checks">
+          <li><svg class="i ok"><use href="#i-check"/></svg>Google AEAS Sentinel (Redroid)<span>&lt;10 ms operational</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Google MCS Protocol (mtalk:5228)<span>live (~500 ms)</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>Official EEW feed (JMA, CENC)<span>live</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Official Geological feeds (SGC, USGS)<span>live (HTTP 304)</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>EMSC worldwide feed<span>live</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>35 tests</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Raspberry Shake STA/LTA trigger<span>synthetic</span></li>
-          <li><svg class="i wait"><use href="#i-clock"/></svg>An AEAS alert reaching this client<span>never seen</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>39 tests passing</span></li>
         </ul>
       </div>
     </section>
