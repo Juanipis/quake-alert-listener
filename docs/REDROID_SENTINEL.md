@@ -125,17 +125,25 @@ docker run -d \
   --restart always \
   --privileged \
   -v /dev/binderfs:/dev/binderfs \
+  --security-opt label=disable \
   -v ~/redroid-data:/data \
   -p 127.0.0.1:5555:5555 \
   redroid/redroid:11.0.0_gapps \
-  androidboot.hardware=mt6885 \
-  ro.secure=0 \
-  ro.boot.hwc=NONE \
-  ro.boot.container=1
+  androidboot.redroid_width=320 \
+  androidboot.redroid_height=240 \
+  androidboot.redroid_dpi=120 \
+  androidboot.redroid_fps=1 \
+  androidboot.redroid_gpu_mode=guest \
+  ro.setupwizard.mode=DISABLED
 ```
 
+A tiny 320×240 screen at 1 fps with software rendering (`gpu_mode=guest`) is enough: nobody looks at it, and it keeps the CPU low. `ro.setupwizard.mode=DISABLED` skips the first-run wizard on a headless device.
+
+> [!NOTE]
+> Redroid needs a Linux kernel with binder. On macOS, OrbStack and Docker Desktop expose `/dev/binder` without binderfs, and the Android 11 image did not boot there in our tests (`servicemanager` cannot register). For local experiments on a Mac, use the Android Emulator instead.
+
 > [!WARNING]
-> Redroid needs `--privileged`, and `ro.secure=0` gives root inside Android. Run it only on a machine you control, keep ADB on `127.0.0.1`, and keep `/data` out of shared folders.
+> Redroid needs `--privileged`, and the image is a `userdebug` build (root shell over ADB). Run it only on a machine you control, keep ADB on `127.0.0.1`, and keep `/data` out of shared folders.
 
 ---
 
