@@ -310,6 +310,121 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 
 # ==============================================================================
+# S2 Geometry Level 8 Cell Projection (Pure Python, Zero External Dependencies)
+# ==============================================================================
+
+_S2_LOOKUP_BITS = 4
+_S2_SWAP_MASK = 1
+_S2_INVERT_MASK = 2
+_S2_LOOKUP_POS = [0] * 1024
+_S2_POS_TO_IJ = [[0, 1, 3, 2], [0, 2, 3, 1], [3, 2, 0, 1], [3, 1, 0, 2]]
+_S2_POS_TO_ORIENTATION = [_S2_SWAP_MASK, 0, 0, _S2_SWAP_MASK | _S2_INVERT_MASK]
+
+
+def _init_s2_lookup(level, i, j, orig_orient, pos, orient):
+    if level == _S2_LOOKUP_BITS:
+        ij = (i << _S2_LOOKUP_BITS) + j
+        _S2_LOOKUP_POS[(ij << 2) + orig_orient] = (pos << 2) + orient
+    else:
+        level += 1
+        i <<= 1
+        j <<= 1
+        pos <<= 2
+        r = _S2_POS_TO_IJ[orient]
+        for idx in range(4):
+            _init_s2_lookup(level, i + (r[idx] >> 1), j + (r[idx] & 1),
+                            orig_orient, pos + idx, orient ^ _S2_POS_TO_ORIENTATION[idx])
+
+
+for _m in (0, _S2_SWAP_MASK, _S2_INVERT_MASK, _S2_SWAP_MASK | _S2_INVERT_MASK):
+    _init_s2_lookup(0, 0, 0, _m, 0, _m)
+
+
+def lat_lon_to_s2_cell_token(lat, lon, level=8):
+    """Convert (latitude, longitude) in degrees to an S2 cell token at the given level.
+
+    Pure-Python implementation matching S2 geometry quadratic projection and
+    Hilbert curve partitioning. Google Play Services uses S2 Level 8 (~38 km cell)
+    for topic subscription in the Android Earthquake Alerts System (AEAS).
+    """
+    lat = max(-90.0, min(90.0, float(lat)))
+    lon = ((float(lon) + 180.0) % 360.0) - 180.0
+
+    phi = math.radians(lat)
+    theta = math.radians(lon)
+    cos_phi = math.cos(phi)
+    x = cos_phi * math.cos(theta)
+    y = cos_phi * math.sin(theta)
+    z = math.sin(phi)
+
+    ax, ay, az = abs(x), abs(y), abs(z)
+    if ax > ay:
+        face = 0 if ax > az else 2
+    else:
+        face = 1 if ay > az else 2
+
+    p = [x, y, z]
+    if p[face] < 0:
+        face += 3
+
+    if face == 0:
+        u, v = y / x, z / x
+    elif face == 1:
+        u, v = -x / y, z / y
+    elif face == 2:
+        u, v = -x / z, -y / z
+    elif face == 3:
+        u, v = z / x, y / x
+    elif face == 4:
+        u, v = z / y, -x / y
+    else:
+        u, v = -y / z, -x / z
+
+    def uv_to_st(v_val):
+        return 0.5 * math.sqrt(1 + 3 * v_val) if v_val >= 0 else 1 - 0.5 * math.sqrt(1 - 3 * v_val)
+
+    max_size = 1 << 30
+    def st_to_ij(s):
+        return max(0, min(max_size - 1, int(math.floor(max_size * s))))
+
+    i = st_to_ij(uv_to_st(u))
+    j = st_to_ij(uv_to_st(v))
+
+    n = face << 60
+    bits = face & _S2_SWAP_MASK
+    for k in range(7, -1, -1):
+        mask = (1 << _S2_LOOKUP_BITS) - 1
+        bits += (((i >> (k * _S2_LOOKUP_BITS)) & mask) << (_S2_LOOKUP_BITS + 2))
+        bits += (((j >> (k * _S2_LOOKUP_BITS)) & mask) << 2)
+        bits = _S2_LOOKUP_POS[bits]
+        n |= (bits >> 2) << (k * 2 * _S2_LOOKUP_BITS)
+        bits &= (_S2_SWAP_MASK | _S2_INVERT_MASK)
+
+    cell_id = n * 2 + 1
+    lsb = 1 << (2 * (30 - level))
+    parent_id = (cell_id & -lsb) | lsb
+    return format(parent_id, "016x").rstrip("0")
+
+
+# Representative global S2 Level 8 tokens used as privacy decoys by default
+GLOBAL_DECOY_CELL_TOKENS = (
+    "afa0b", "a4dcb", "bae69", "1664b", "3b905", "54ab1", "82f9b", "99277",
+    "1c73b", "2fd4b", "85c73", "14cab", "9105d", "80c2d", "34689", "32f91"
+)
+
+
+def generate_s2_decoy_tokens(primary_token, count=3):
+    """Generate deterministic or pseudo-random decoy S2 Level 8 tokens for privacy."""
+    seed = sum(ord(c) for c in primary_token)
+    candidates = [tok for tok in GLOBAL_DECOY_CELL_TOKENS if tok != primary_token]
+    decoys = []
+    for i in range(count):
+        idx = (seed + i * 7) % len(candidates)
+        decoys.append(candidates[idx])
+    return decoys
+
+
+# ==============================================================================
 # Anonymous Device Hardware Registration
 # ==============================================================================
 
@@ -603,29 +718,74 @@ def get_credentials(locale="en_US", tz="UTC", device_type=None):
 
 def _decode_event(ev):
     mag = None
-    mag_raw = _pb_bytes(ev, 7)
-    if mag_raw is not None:
-        mag_p = parse_protobuf(mag_raw)
-        if 2 in mag_p:
-            num = _pb_number(*mag_p[2][0])
-            if num is not None and not math.isnan(num):
-                mag = round(num, 1)
-        elif 1 in mag_p:
-            num = _pb_number(*mag_p[1][0])
-            if num is not None and not math.isnan(num):
-                mag = round(num, 1)
-
-    region = _pb_text(ev, 8, default="Region")
+    region = None
     origin_ts, alert_id = None, None
+    epicenter_lat, epicenter_lon, radius_km, depth_km = None, None, None, None
+
+    # 1. Google Play Services 26.37.37 (gmta) field 14: EarthquakeWrap -> EarthquakeInfo
+    if 14 in ev:
+        for wire, wrap_b in ev[14]:
+            if wire != 2:
+                continue
+            gmsq = parse_protobuf(wrap_b)
+            for _, info_b in gmsq.get(1, []):
+                gmsr = parse_protobuf(info_b)
+                if 1 in gmsr:
+                    raw_mag = gmsr[1][0][1]
+                    if isinstance(raw_mag, int):
+                        mag = round(struct.unpack("<f", struct.pack("<I", raw_mag))[0], 1)
+                    elif isinstance(raw_mag, float):
+                        mag = round(raw_mag, 1)
+                if 2 in gmsr:
+                    latlng = parse_protobuf(gmsr[2][0][1])
+                    if 1 in latlng:
+                        raw_lat = latlng[1][0][1]
+                        epicenter_lat = struct.unpack("<d", struct.pack("<Q", raw_lat))[0] if isinstance(raw_lat, int) else raw_lat
+                    if 2 in latlng:
+                        raw_lon = latlng[2][0][1]
+                        epicenter_lon = struct.unpack("<d", struct.pack("<Q", raw_lon))[0] if isinstance(raw_lon, int) else raw_lon
+                if 3 in gmsr:
+                    raw_d = gmsr[3][0][1]
+                    depth_km = round(raw_d / 1000.0, 1) if isinstance(raw_d, (int, float)) and raw_d > 0 else None
+                if 4 in gmsr:
+                    ts_p = parse_protobuf(gmsr[4][0][1])
+                    sec = ts_p.get(1, [(0, None)])[0][1]
+                    if isinstance(sec, (int, float)) and sec > 0:
+                        origin_ts = float(sec)
+
+    # 2. Legacy / alternate field 7 for magnitude
+    if mag is None:
+        mag_raw = _pb_bytes(ev, 7)
+        if mag_raw is not None:
+            mag_p = parse_protobuf(mag_raw)
+            if 2 in mag_p:
+                num = _pb_number(*mag_p[2][0])
+                if num is not None and not math.isnan(num):
+                    mag = round(num, 1)
+            elif 1 in mag_p:
+                num = _pb_number(*mag_p[1][0])
+                if num is not None and not math.isnan(num):
+                    mag = round(num, 1)
+
+    region = _pb_text(ev, 8, default=None)
+    if not region:
+        region = "AEAS Earthquake Area"
+
+    # 3. Alert ID & origin time from meta header (field 1)
     meta = _pb_bytes(ev, 1)
     if meta is not None:
         meta_p = parse_protobuf(meta)
-        alert_id = _pb_text(meta_p, 3)
+        alert_id = _pb_text(meta_p, 3) or _pb_text(meta_p, 1)
         wire, ms = _pb_first(meta_p, 4)
         if wire == 0 and isinstance(ms, int) and 946684800000 <= ms <= 4102444800000:  # 2000..2100
             origin_ts = ms / 1000.0
-    epicenter_lat, epicenter_lon, radius_km = None, None, None
+        elif origin_ts is None and 2 in meta_p:
+            ts_p = parse_protobuf(meta_p[2][0][1])
+            sec = ts_p.get(1, [(0, None)])[0][1]
+            if isinstance(sec, (int, float)) and sec > 0:
+                origin_ts = float(sec)
 
+    # 4. Impact zone geometry / contours (field 6)
     geom = _pb_bytes(ev, 6)
     if geom is not None:
         jeif = parse_protobuf(geom)
@@ -645,7 +805,7 @@ def _decode_event(ev):
                         if radius_m is not None and radius_m >= 0:
                             radius_km = round(radius_m / 1000.0, 1)
                     center = _pb_bytes(circ, 1)
-                    if center is not None:
+                    if center is not None and (epicenter_lat is None or epicenter_lon is None):
                         jhom = parse_protobuf(center)
                         if 1 in jhom:
                             epicenter_lat = _pb_coordinate(*jhom[1][0], limit=90.0)
@@ -658,6 +818,7 @@ def _decode_event(ev):
         "lat": epicenter_lat,
         "lon": epicenter_lon,
         "radius_km": radius_km,
+        "depth_km": depth_km,
         "origin_ts": origin_ts,
         "alert_id": alert_id,
     }
@@ -669,7 +830,7 @@ def aeas_event(ev):
         "source": "Android AEAS (MCS)", "kind": "aeas",
         "event_id": ev.get("alert_id") or _new_event_id("aeas"), "revision": None,
         "origin_ts": ev.get("origin_ts"), "lat": ev.get("lat"), "lon": ev.get("lon"),
-        "depth_km": None, "magnitude": ev.get("magnitude"), "magnitude_type": None,
+        "depth_km": ev.get("depth_km"), "magnitude": ev.get("magnitude"), "magnitude_type": None,
         "region": ev.get("region"), "radius_km": ev.get("radius_km"), "url": None,
         "final": None, "cancelled": False, "training": False,
     }
@@ -726,7 +887,8 @@ MAX_HEARTBEAT_S = 28 * 60                 # Chromium cellular default; never wai
 
 
 class QuakeMCSClient:
-    def __init__(self, creds, ping_interval=120):
+    def __init__(self, creds, ping_interval=120, topics=None, s2_cell=None,
+                 lat=None, lon=None, decoys=True):
         self.android_id = int(creds["android_id"])
         self.security_token = int(creds["security_token"])
         self.device_type = creds.get("device_type", "chrome")
@@ -746,6 +908,21 @@ class QuakeMCSClient:
         self.handshake_latency_ms = None  # TCP + TLS + login time of the last connect
         self._buf = bytearray()
         self._last_rx_mono = time.monotonic()
+        # S2 Geographic cell & topic subscriptions (Field 29 of LoginRequest)
+        self.topics = list(topics or creds.get("topics") or [])
+        self.s2_cell = s2_cell or creds.get("s2_cell")
+        if not self.topics:
+            cell = self.s2_cell
+            if not cell and lat is not None and lon is not None:
+                try:
+                    cell = lat_lon_to_s2_cell_token(float(lat), float(lon), 8)
+                except Exception:
+                    cell = None
+            if cell:
+                self.s2_cell = cell
+                self.topics = [f"ea.{cell}"]
+                if decoys:
+                    self.topics.extend(f"ea.{d}" for d in generate_s2_decoy_tokens(cell, 3))
         # Stream bookkeeping (mcs.proto: "each side keeps a counter").
         self.stream_id_in = 0     # packets received this session (LoginResponse = 1)
         self.stream_id_out = 0    # packets sent this session (LoginRequest = 1)
@@ -789,7 +966,8 @@ class QuakeMCSClient:
             field_varint(12, 0) +                         # adaptive_heartbeat = false
             field_varint(14, 1) +                         # use_rmq2
             field_varint(16, 2) +                         # auth_service = ANDROID_ID
-            field_varint(17, 1)                           # network_type
+            field_varint(17, 1) +                         # network_type
+            b"".join(field_str(29, topic) for topic in self.topics)
         )
         return bytes([MCS_VERSION, TAG_LOGIN_REQUEST]) + encode_varint(len(login_req)) + login_req
 
@@ -951,7 +1129,8 @@ class QuakeMCSClient:
             self.connected = True
             self._cond.notify_all()
         port_note = "" if self.port == MCS_PORTS[0] else " via fallback port"
-        log(f"Authenticated with {HOST_MCS}:{self.port}{port_note} (Handshake latency: {self.handshake_latency_ms} ms)")
+        topic_note = f" (Subscribed to {len(self.topics)} topics: {', '.join(self.topics)})" if self.topics else ""
+        log(f"Authenticated with {HOST_MCS}:{self.port}{port_note}{topic_note} (Handshake latency: {self.handshake_latency_ms} ms)")
 
     def close(self):
         with self._cond:
@@ -1190,6 +1369,8 @@ def _sync_client_counters(client):
         stream_id_in=client.stream_id_in,
         stream_id_out=client.stream_id_out,
         stream_acks_sent=client.stream_acks_sent,
+        s2_cell=client.s2_cell,
+        topics=client.topics,
     )
 
 
@@ -2883,15 +3064,30 @@ def _handle_data_message(client, payload, dispatch_alert):
     client.messages_received += 1
     stanza = parse_protobuf(payload)
     cat = _pb_text(stanza, 5, default="", encoding="latin1")
+    sender = _pb_text(stanza, 3, default="", encoding="latin1")
     pid = _pb_text(stanza, 9, default="")
     raw = _pb_bytes(stanza, 21)
     if not client.register_persistent_id(pid):
         log(f"Ignoring re-delivered message {pid}")
         return
-    if raw and cat == "com.google.android.gms":
+
+    is_ealert = (cat == "com.google.android.gms" or "quake" in sender.lower() or "ealert" in sender.lower())
+    if not raw or not is_ealert:
+        for wire, app_data_b in stanza.get(7, []):
+            if wire == 2:
+                ad = parse_protobuf(app_data_b)
+                k = _pb_text(ad, 1, default="", encoding="latin1")
+                v = _pb_text(ad, 2, default="", encoding="latin1")
+                if k == "gcms" and "quake" in v:
+                    is_ealert = True
+                if k == "rawData" and not raw:
+                    raw = _pb_bytes(ad, 2)
+
+    if raw and (is_ealert or cat == "com.google.android.gms"):
+        log(f"Received Google AEAS push stanza ({len(raw)} bytes) from {sender or cat}")
         events = decode_earthquake_payload(raw)
         if not events:
-            log(f"Data message from {cat} contained no decodable earthquake events ({len(raw)} bytes)")
+            log(f"Data message from {cat or sender} contained no decodable earthquake events ({len(raw)} bytes)")
         for ev in events:
             dispatch_alert(ev)
 
@@ -3031,7 +3227,11 @@ def run_listener(args):
                 if (client is None or client.android_id != int(creds["android_id"])
                         or client.security_token != int(creds["security_token"])):
                     old = client
-                    client = QuakeMCSClient(creds, ping_interval=args.ping_interval)
+                    topics_arg = [t.strip() for t in args.topics.split(",") if t.strip()] if getattr(args, "topics", "") else None
+                    client = QuakeMCSClient(creds, ping_interval=args.ping_interval,
+                                            topics=topics_arg, s2_cell=getattr(args, "s2_cell", None),
+                                            lat=args.lat, lon=args.lon,
+                                            decoys=not getattr(args, "no_decoys", False))
                     if old is not None:
                         client._unacked_ids = old.unacked_persistent_ids
                     GLOBAL_CLIENT = client
@@ -3143,7 +3343,12 @@ def test_ping(args=None):
         creds = get_credentials(locale, tz, device_type=dtype)
         if checkin_due(creds):
             creds = refresh_checkin(creds, device_type=dtype)
-        client = QuakeMCSClient(creds)
+        topics_arg = [t.strip() for t in args.topics.split(",") if t.strip()] if (args and getattr(args, "topics", "")) else None
+        client = QuakeMCSClient(creds, topics=topics_arg,
+                                s2_cell=getattr(args, "s2_cell", None) if args else None,
+                                lat=getattr(args, "lat", None) if args else None,
+                                lon=getattr(args, "lon", None) if args else None,
+                                decoys=not (args and getattr(args, "no_decoys", False)))
         client.connect()
         client.send_ping()
         rtt = None
@@ -3266,6 +3471,9 @@ def build_parser():
     parser.add_argument("--webhook-secret", type=str, default=env("QUAKE_WEBHOOK_SECRET", ""), help="Optional HMAC-SHA256 secret for payload signing (prefer the env var: CLI args are visible in `ps`)")
     parser.add_argument("--credentials-file", type=str, default=env("QUAKE_CREDENTIALS_FILE", DEFAULT_CREDENTIALS_FILE), help="Where the anonymous device identity is stored (default: ~/.quake_device_credentials.json)")
     parser.add_argument("--device-type", choices=["android", "chrome"], default=env("QUAKE_DEVICE_TYPE", "android"), help="Device checkin identity profile: android (GMS Pixel 6 profile) or chrome (Chromium GCM profile). Default: android")
+    parser.add_argument("--s2-cell", type=str, default=env("QUAKE_S2_CELL", ""), help="S2 Level 8 cell token to subscribe to in Field 29 (e.g. 8e443). Automatically derived from --lat and --lon if not set")
+    parser.add_argument("--topics", type=str, default=env("QUAKE_TOPICS", ""), help="Comma-separated custom MCS topics to subscribe to in Field 29 (e.g. ea.8e443,ea.afa0b)")
+    parser.add_argument("--no-decoys", action="store_true", default=env("QUAKE_NO_DECOYS", "") not in ("", "0", "false"), help="Do not add random decoy S2 cells when subscribing to MCS topics")
     parser.add_argument("--android-secret", type=str, default=env("QUAKE_ANDROID_SECRET", env("SISMO_ANDROID_SECRETO", "")), help="HMAC-SHA256 secret that POST /android requests must be signed with (default: --webhook-secret). Without any secret, only clients on this machine may post alerts. Prefer the env var QUAKE_ANDROID_SECRET")
     parser.add_argument("--locale", type=str, default=env("QUAKE_LOCALE", "en_US"), help="Locale for device registration")
     parser.add_argument("--timezone", type=str, default=env("QUAKE_TIMEZONE", "UTC"), help="Timezone for device registration")

@@ -762,5 +762,79 @@ class Cli(unittest.TestCase):
             self.assertEqual(ql.is_host_allowed(host), ok, host)
 
 
+class S2AndEAlertTopics(unittest.TestCase):
+    def test_s2_cell_token_calculation(self):
+        # Medellín, Colombia (real token extracted from Motorola e5 Play EARStorage: 8e443)
+        self.assertEqual(ql.lat_lon_to_s2_cell_token(6.3373, -75.5580, 8), "8e443")
+        # Santiago, Chile
+        self.assertEqual(ql.lat_lon_to_s2_cell_token(-33.4489, -70.6693, 8), "9662d")
+        # Los Angeles, CA
+        self.assertEqual(ql.lat_lon_to_s2_cell_token(34.0522, -118.2437, 8), "80c2d")
+        # Decoys generator
+        decoys = ql.generate_s2_decoy_tokens("8e443", 3)
+        self.assertEqual(len(decoys), 3)
+        self.assertNotIn("8e443", decoys)
+        self.assertEqual(len(set(decoys)), 3)
+
+    def test_login_request_carries_topics(self):
+        # 1. No topics
+        c = ql.QuakeMCSClient({"android_id": 1234, "security_token": 5678})
+        sock = FakeSock(bytes([ql.MCS_VERSION]) + mcs_frame(ql.TAG_LOGIN_RESPONSE, ql.field_str(1, "0")))
+        c._open = lambda port: sock
+        c.connect()
+        req = sock.login_request()
+        self.assertNotIn(29, req)
+
+        # 2. Explicit topics
+        c2 = ql.QuakeMCSClient({"android_id": 1234, "security_token": 5678},
+                               topics=["ea.8e443", "ea.afa0b"])
+        sock2 = FakeSock(bytes([ql.MCS_VERSION]) + mcs_frame(ql.TAG_LOGIN_RESPONSE, ql.field_str(1, "0")))
+        c2._open = lambda port: sock2
+        c2.connect()
+        req2 = sock2.login_request()
+        self.assertIn(29, req2)
+        topics = [val.decode() for wire, val in req2[29]]
+        self.assertEqual(topics, ["ea.8e443", "ea.afa0b"])
+
+        # 3. Automatic S2 derivation from lat/lon
+        c3 = ql.QuakeMCSClient({"android_id": 1234, "security_token": 5678},
+                               lat=6.3373, lon=-75.5580, decoys=True)
+        sock3 = FakeSock(bytes([ql.MCS_VERSION]) + mcs_frame(ql.TAG_LOGIN_RESPONSE, ql.field_str(1, "0")))
+        c3._open = lambda port: sock3
+        c3.connect()
+        req3 = sock3.login_request()
+        self.assertIn(29, req3)
+        topics3 = [val.decode() for wire, val in req3[29]]
+        self.assertEqual(topics3[0], "ea.8e443")
+        self.assertEqual(len(topics3), 4)  # 1 primary + 3 decoys
+
+    def test_gmta_payload_decodes_with_origin_and_geometry(self):
+        # GMS 26.37.37 AlertBatch payload with EarthquakeWrap (field 14)
+        def field_float(tag, val):
+            return ql.encode_varint((tag << 3) | 5) + struct.pack("<f", val)
+
+        origin_ts_b = ql.field_varint(1, 1791557000)
+        epicenter_b = ql.field_double(1, 6.42) + ql.field_double(2, -75.52)
+        quake_info_b = (
+            field_float(1, 5.8) +
+            ql.field_bytes(2, epicenter_b) +
+            ql.field_varint(3, 15000) +
+            ql.field_bytes(4, origin_ts_b)
+        )
+        wrap_b = ql.field_bytes(1, quake_info_b)
+        alert_b = ql.field_bytes(1, ql.field_str(1, "EAlert_LIVE_001")) + ql.field_bytes(14, wrap_b)
+        batch = ql.field_bytes(2, alert_b)
+
+        events = ql.decode_earthquake_payload(batch)
+        self.assertEqual(len(events), 1)
+        ev = events[0]
+        self.assertEqual(ev["magnitude"], 5.8)
+        self.assertAlmostEqual(ev["lat"], 6.42)
+        self.assertAlmostEqual(ev["lon"], -75.52)
+        self.assertEqual(ev["depth_km"], 15.0)
+        self.assertEqual(ev["origin_ts"], 1791557000.0)
+        self.assertEqual(ev["alert_id"], "EAlert_LIVE_001")
+
+
 if __name__ == "__main__":
     unittest.main()

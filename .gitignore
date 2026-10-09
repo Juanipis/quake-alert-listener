@@ -1,5 +1,8 @@
 .device_credentials.json
 .google_device.json
+synthetic_fleet.json
+credentials/
+*.jsonl
 .env
 .sismo.env
 *.db
