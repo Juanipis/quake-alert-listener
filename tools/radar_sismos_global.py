@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """radar_sismos_global.py - Autonomous Global Fleet of Google Seismic Radar Receivers.
 
-Maintains a distributed fleet of 21 independent synthetic Google Pixel devices,
+Maintains a distributed fleet of 22 independent synthetic Google Pixel devices,
 each assigned to a high-seismicity region in the world with its own android_id,
 security_token, S2 Level 8 geographic cell, and 3 decoy cells, fully emulating
 Google Play Services behavior.
@@ -17,6 +17,7 @@ Monitored regions:
   - Colombia (Bucaramanga/Los Santos Nest, Medellin)
   - California (Los Angeles / San Andreas Fault)
   - Taiwan (Hualien)
+  - Panama (Gulf of Montijo / Chiriqui)
 
 Usage:
   ./radar_sismos_global.py                    # Run continuous radar daemon
@@ -81,6 +82,7 @@ HOTSPOTS = [
     {"nombre": "Colombia - Medellin", "pais": "Colombia", "lat": 6.2442, "lon": -75.5812, "locale": "es_CO", "tz": "America/Bogota"},
     {"nombre": "California - Los Angeles", "pais": "USA", "lat": 34.0522, "lon": -118.2437, "locale": "en_US", "tz": "America/Los_Angeles"},
     {"nombre": "Taiwan - Hualien", "pais": "Taiwan", "lat": 23.9872, "lon": 121.6016, "locale": "zh_TW", "tz": "Asia/Taipei"},
+    {"nombre": "Panama - Golfo de Montijo", "pais": "Panama", "lat": 7.575, "lon": -80.951, "locale": "es_PA", "tz": "America/Panama"},
 ]
 
 ESTADO = {
@@ -336,20 +338,24 @@ def checkin_virtual_device(locale="en_US", timezone="UTC"):
 
 
 def ensure_fleet_credentials(force=False):
-    """Load or generate the 21-node synthetic fleet credentials."""
+    """Load or generate synthetic fleet credentials (preserves existing node credentials)."""
+    flota = {}
     if not force and os.path.isfile(FLEET_FILE):
         try:
             with open(FLEET_FILE, "r") as f:
                 flota = json.load(f)
-            if len(flota) == len(HOTSPOTS):
+            if all(s["nombre"] in flota for s in HOTSPOTS):
                 return flota
         except Exception:
-            pass
+            flota = {}
 
-    log(f"Generating synthetic fleet for {len(HOTSPOTS)} seismic hotspots...")
-    flota = {}
+    log(f"Configuring synthetic fleet for {len(HOTSPOTS)} seismic hotspots...")
+    actualizado = False
     for spot in HOTSPOTS:
         nombre = spot["nombre"]
+        if not force and nombre in flota and "android_id" in flota[nombre]:
+            continue
+        actualizado = True
         cell = lat_lon_to_s2_cell_token(spot["lat"], spot["lon"], 8)
         decoys = [f"ea.{d}" for d in generate_decoys(cell, 3)]
         aid, tok = checkin_virtual_device(spot["locale"], spot["tz"])
@@ -369,11 +375,12 @@ def ensure_fleet_credentials(force=False):
         log(f"  ✓ {nombre} -> S2: ea.{cell} (AID: {aid})")
         time.sleep(0.3)
 
-    os.makedirs(os.path.dirname(FLEET_FILE), exist_ok=True)
-    with open(FLEET_FILE, "w") as f:
-        json.dump(flota, f, indent=2)
-    os.chmod(FLEET_FILE, 0o600)
-    log(f"Synthetic fleet saved to {FLEET_FILE} (mode 0600)")
+    if actualizado or not os.path.isfile(FLEET_FILE):
+        os.makedirs(os.path.dirname(FLEET_FILE), exist_ok=True)
+        with open(FLEET_FILE, "w") as f:
+            json.dump(flota, f, indent=2)
+        os.chmod(FLEET_FILE, 0o600)
+        log(f"Synthetic fleet saved to {FLEET_FILE} (mode 0600)")
     return flota
 
 
