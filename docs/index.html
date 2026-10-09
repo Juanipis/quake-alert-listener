@@ -978,7 +978,7 @@
           <div class="src"><span class="src-k ok">live</span><h4>USGS &amp; SGC feeds</h4><p>USGS worldwide and Colombia's SGC catalogue, polled with HTTP 304 caching so an idle feed costs almost nothing.</p><dl><dt>Speed</dt><dd>minutes</dd><dt>Where</dt><dd>Worldwide · Colombia</dd></dl></div>
           <div class="src"><span class="src-k ok">ready</span><h4>Your own sensor</h4><p>A Raspberry Shake streams over UDP; an STA/LTA trigger catches the P-wave on site. Tested with synthetic signals.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Anywhere</dd></dl></div>
           <div class="src"><span class="src-k wait">trial</span><h4>Android sentinel</h4><p>Optional: a real or containerized Android forwards Google's alert to the bridge. Tried in Oct 2026: no real alert captured; paused.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Where Google alerts</dd></dl></div>
-          <div class="src"><span class="src-k wait">research</span><h4>Google MCS socket</h4><p>A working client for Google's push protocol. Google doesn't alert a bare socket, so it is kept for research.</p><dl><dt>Speed</dt><dd>n/a</dd><dt>Where</dt><dd>mtalk:5228</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>Google MCS socket</h4><p>Direct Google AEAS push client with S2 Level 8 cell subscriptions (Field 29) + decoys. 22-node radar fleet active.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Worldwide (AEAS cells)</dd></dl></div>
         </div>
       </div>
     </section>
@@ -989,7 +989,7 @@
         <div>
           <p class="kicker" style="color:var(--amber)">03 / Where it stands</p>
           <h2>Honest status: early warnings where they exist.</h2>
-          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you on-site P-wave triggers anywhere. EMSC, USGS and SGC report every quake minutes later. Google's alerts are the open question: the push protocol works, but Google only alerts devices that report a location, so an optional Android container now watches for them; it has not caught a real quake yet. Intensities follow Allen, Wald &amp; Worden (2012).</p>
+          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you on-site P-wave triggers anywhere. EMSC, USGS and SGC report every quake minutes later. Google's Android Earthquake Alerts are monitored via direct MCS socket with S2 Level 8 cell subscriptions (Field 29) and an autonomous 22-node radar fleet. Intensities follow Allen, Wald &amp; Worden (2012).</p>
           <div class="status-ctas">
             <a class="btn btn-primary" href="https://github.com/Juanipis/quake-alert-listener/issues/new" target="_blank" rel="noopener">Report what you see</a>
             <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Read the code</a>
@@ -998,10 +998,10 @@
         <ul class="checks">
           <li><svg class="i ok"><use href="#i-check"/></svg>Official EEW feed (JMA, CENC)<span>live</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>EMSC, USGS and SGC feeds<span>live</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>50 tests passing</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>53 tests passing</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>Raspberry Shake trigger<span>synthetic signals</span></li>
           <li><svg class="i wait"><use href="#i-check"/></svg>Android sentinel (Redroid)<span>no real alert yet</span></li>
-          <li><svg class="i wait"><use href="#i-check"/></svg>Google MCS socket<span>research only</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Google MCS socket (Field 29)<span>live listening (22 nodes)</span></li>
         </ul>
       </div>
     </section>
