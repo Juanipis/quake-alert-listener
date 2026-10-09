@@ -228,10 +228,10 @@ Earlier analysis assumed Google's cloud server only dispatched earthquake push a
    - `depth_m` (int32, field 3)
    - `origin_time` (timestamp seconds, field 4) -> feeds our precise S-wave ETA calculation!
 5. **Multi-Device Autonomous Fleet (`tools/radar_sismos_global.py`):**
-   Using the Google Checkin API, we don't need physical Android devices. We deployed an autonomous fleet of **21 independent virtual Google Pixel 6** devices multiplexed over non-blocking TLS sockets (~43 MB total RAM) monitoring high-risk subduction zones worldwide:
-   Chile, Philippines, Indonesia, Mexico, Turkey, Greece, Peru, California, Taiwan, and Colombia.
+   Using the Google Checkin API, we don't need physical Android devices. We deployed an autonomous fleet of **22 independent virtual Google Pixel 6** devices multiplexed over non-blocking TLS sockets (~43 MB total RAM) monitoring high-risk subduction zones worldwide:
+   Chile, Philippines, Indonesia, Mexico, Turkey, Greece, Peru, California, Taiwan, Colombia, and Panama.
 6. **Current Status:**
-   Both the single-node listener and the 21-node global fleet are connected live to `mtalk.google.com:5228` with topic subscriptions active, awaiting the first live earthquake alert from Google to capture and log the real wire packet.
+   Both the single-node listener and the 22-node global fleet are connected live to `mtalk.google.com:5228` with topic subscriptions active, awaiting the first live earthquake alert from Google to capture and log the real wire packet.
 
 ### The workaround: a real Android device (optional)
 
