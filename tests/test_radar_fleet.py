@@ -4,6 +4,7 @@
 Run: python -m unittest discover -s tests   (also works next to a deployed copy of the radar)
 """
 import base64
+import contextlib
 import importlib.util
 import json
 import os
@@ -318,3 +319,42 @@ class TestFlotaSenuelos(unittest.TestCase):
     def test_token_s2(self):
         self.assertEqual(radar.lat_lon_to_s2_cell_token(6.337, -75.558), "8e443")   # Bello = celda de Medellín
         self.assertEqual(radar.lat_lon_to_s2_cell_token(42.9, -113.9), "54ab1")    # Idaho (Flood Watch)
+
+
+class TestSinRegistroAccidental(unittest.TestCase):
+    """Registering identities talks to Google: only an explicit --generate-fleet may do it.
+
+    Regression test: on 2026-10-10 running `--decodificar` in an empty directory registered a whole
+    fleet because the fleet used to be created automatically when the file was missing.
+    """
+
+    def _correr(self, *argv):
+        def prohibido(*a, **k):
+            raise AssertionError("tried to contact Google")
+        with tempfile.TemporaryDirectory() as d:
+            orig = (radar.FLEET_FILE, radar.BASE_DIR, radar.checkin_virtual_device, radar.urllib.request.urlopen, sys.argv)
+            radar.FLEET_FILE, radar.BASE_DIR = os.path.join(d, "synthetic_fleet.json"), d
+            radar.checkin_virtual_device = radar.urllib.request.urlopen = prohibido
+            sys.argv = ["radar_sismos_global.py"] + list(argv)
+            try:
+                with open(os.devnull, "w") as nulo, contextlib.redirect_stdout(nulo):
+                    try:
+                        radar.main()
+                        codigo = 0
+                    except SystemExit as e:
+                        codigo = e.code
+                creado = os.path.exists(radar.FLEET_FILE)
+            finally:
+                (radar.FLEET_FILE, radar.BASE_DIR, radar.checkin_virtual_device,
+                 radar.urllib.request.urlopen, sys.argv) = orig
+        return codigo, creado
+
+    def test_sin_flota_no_registra_nada(self):
+        for argv in ([], ["--test-connection"], ["--update-decoys"]):
+            codigo, creado = self._correr(*argv)
+            self.assertEqual(codigo, 1, argv)
+            self.assertFalse(creado, argv)
+
+    def test_decodificar_sin_flota(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl") as vacio:
+            self.assertEqual(self._correr("--decodificar", vacio.name), (0, False))
