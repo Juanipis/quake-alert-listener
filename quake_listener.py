@@ -716,6 +716,42 @@ def get_credentials(locale="en_US", tz="UTC", device_type=None):
 # Earthquake Alert Protobuf Decoder (AEAS)
 # ==============================================================================
 
+CRISIS_KINDS = {1: "public_alert", 2: "sos_alert"}
+
+
+def _crisis_info(ev):
+    """Google crisis alerts share the gmta layout but are not earthquakes.
+
+    Seen on the wire in Oct 2026 (gcms=crisisalerts, persistent_id "CRISIS"): type 1 = public
+    alert (`pa:` ids, e.g. a US National Weather Service "Flood Watch") and type 2 = SOS alert
+    (`cmid:` ids, e.g. "Hurricane Simon"). They carry no EarthquakeWrap (field 14), localized
+    texts in field 9 and the source in field 12. Returns a summary dict, or None for earthquakes.
+    """
+    if 14 in ev or not (9 in ev or 12 in ev):
+        return None
+    texts = {}
+    for wire, tb in ev.get(9, []):
+        if wire != 2:
+            continue
+        t = parse_protobuf(tb)
+        lang = _pb_text(t, 1)
+        public = _pb_bytes(t, 2)
+        if public is not None:                       # {1 headline, 2 area, 3 sender}
+            m = parse_protobuf(public)
+            info = {"title": _pb_text(m, 1), "area": _pb_text(m, 2), "sender": _pb_text(m, 3)}
+        else:                                        # SOS: {3: {2 title}}
+            info = {"title": _pb_text(parse_protobuf(_pb_bytes(t, 3) or b""), 2)}
+        if lang and info["title"]:
+            texts[lang] = info
+    best = texts.get("en") or next(iter(texts.values()), {})
+    src = _pb_bytes(ev, 12)
+    wire, kind = _pb_first(ev, 3)
+    return {"kind": CRISIS_KINDS.get(kind if wire == 0 else None, "crisis_alert"),
+            "title": best.get("title"), "area": best.get("area"), "sender": best.get("sender"),
+            "source": _pb_text(parse_protobuf(src), 1) if src is not None else None,
+            "languages": len(texts)}
+
+
 def _decode_event(ev):
     mag = None
     region = None
@@ -821,6 +857,7 @@ def _decode_event(ev):
         "depth_km": depth_km,
         "origin_ts": origin_ts,
         "alert_id": alert_id,
+        "crisis": _crisis_info(ev),
     }
 
 
@@ -1261,16 +1298,19 @@ class QuakeMCSClient:
                 self._cond.wait(remaining)
 
     # ----------------------------------------------------------- data messages
-    def register_persistent_id(self, pid):
+    def register_persistent_id(self, pid, raw=None):
         """De-duplicate deliveries by persistent_id. Returns False for a re-delivery.
 
+        The persistent_id alone is not unique: every Google crisis alert arrives with
+        persistent_id "CRISIS", so the raw payload is part of the key when there is one.
         (Acknowledging the id to the server is handled by on_frame / _send.)
         """
         if not pid:
             return True
-        if pid in self._seen_persistent_ids:
+        key = f"{pid}|{hashlib.sha256(raw).hexdigest()[:16]}" if raw else pid
+        if key in self._seen_persistent_ids:
             return False
-        self._seen_persistent_ids[pid] = True
+        self._seen_persistent_ids[key] = True
         while len(self._seen_persistent_ids) > 512:
             self._seen_persistent_ids.popitem(last=False)
         return True
@@ -3067,21 +3107,22 @@ def _handle_data_message(client, payload, dispatch_alert):
     sender = _pb_text(stanza, 3, default="", encoding="latin1")
     pid = _pb_text(stanza, 9, default="")
     raw = _pb_bytes(stanza, 21)
-    if not client.register_persistent_id(pid):
+    gcms = ""
+    is_ealert = (cat == "com.google.android.gms" or "quake" in sender.lower() or "ealert" in sender.lower())
+    for wire, app_data_b in stanza.get(7, []):
+        if wire == 2:
+            ad = parse_protobuf(app_data_b)
+            k = _pb_text(ad, 1, default="", encoding="latin1")
+            v = _pb_text(ad, 2, default="", encoding="latin1")
+            if k == "gcms":
+                gcms = v
+                if "quake" in v:
+                    is_ealert = True
+            if k == "rawData" and not raw:
+                raw = _pb_bytes(ad, 2)
+    if not client.register_persistent_id(pid, raw):
         log(f"Ignoring re-delivered message {pid}")
         return
-
-    is_ealert = (cat == "com.google.android.gms" or "quake" in sender.lower() or "ealert" in sender.lower())
-    if not raw or not is_ealert:
-        for wire, app_data_b in stanza.get(7, []):
-            if wire == 2:
-                ad = parse_protobuf(app_data_b)
-                k = _pb_text(ad, 1, default="", encoding="latin1")
-                v = _pb_text(ad, 2, default="", encoding="latin1")
-                if k == "gcms" and "quake" in v:
-                    is_ealert = True
-                if k == "rawData" and not raw:
-                    raw = _pb_bytes(ad, 2)
 
     if raw and (is_ealert or cat == "com.google.android.gms"):
         log(f"Received Google AEAS push stanza ({len(raw)} bytes) from {sender or cat}")
@@ -3089,6 +3130,14 @@ def _handle_data_message(client, payload, dispatch_alert):
         if not events:
             log(f"Data message from {cat or sender} contained no decodable earthquake events ({len(raw)} bytes)")
         for ev in events:
+            crisis = ev.get("crisis")
+            if crisis or gcms == "crisisalerts":
+                c = crisis or {}
+                where = f" · {c['area']}" if c.get("area") else ""
+                log(f"Google crisis alert, not an earthquake ({c.get('kind', gcms)}): "
+                    f"{c.get('title') or '?'}{where} [{c.get('sender') or c.get('source') or '?'}] "
+                    f"id={ev.get('alert_id')}; not dispatched")
+                continue
             dispatch_alert(ev)
 
 

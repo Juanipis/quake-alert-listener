@@ -17,6 +17,7 @@ import sys
 import threading
 import time
 import types
+import base64
 import unittest
 import urllib.error
 import urllib.request
@@ -835,6 +836,56 @@ class S2AndEAlertTopics(unittest.TestCase):
         self.assertEqual(ev["origin_ts"], 1791557000.0)
         self.assertEqual(ev["alert_id"], "EAlert_LIVE_001")
 
+
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+
+
+class CrisisAlertTests(unittest.TestCase):
+    """Google crisis alerts (hurricanes, floods) use the same gmta wire format as earthquakes."""
+
+    def setUp(self):
+        with open(os.path.join(DATA_DIR, "crisis_hurricane_simon_rawdata.b64")) as f:
+            self.raw = base64.b64decode(f.read())   # real rawData received on 2026-10-09
+
+    def _stanza(self, raw, gcms="crisisalerts", pid="CRISIS"):
+        s = ql.field_str(3, "745476177629") + ql.field_str(5, "com.google.android.gms")
+        s += ql.field_bytes(7, ql.field_str(1, "gcms") + ql.field_str(2, gcms))
+        s += ql.field_str(9, pid) + ql.field_bytes(21, raw)
+        return s
+
+    def _client(self):
+        return ql.QuakeMCSClient({"android_id": 1, "security_token": 2})
+
+    def test_real_sos_alert_is_recognised(self):
+        ev, = ql.decode_earthquake_payload(self.raw)
+        self.assertEqual(ev["alert_id"], "cmid:610b3195d52aaa9e")
+        self.assertIsNone(ev["magnitude"])
+        self.assertEqual(ev["crisis"]["kind"], "sos_alert")
+        self.assertEqual(ev["crisis"]["title"], "Hurricane Simon")
+        self.assertEqual(ev["crisis"]["source"], "SOS_ALERT")
+        self.assertEqual(ev["crisis"]["languages"], 24)
+
+    def test_crisis_alert_is_not_dispatched_as_earthquake(self):
+        sent = []
+        ql._handle_data_message(self._client(), self._stanza(self.raw), sent.append)
+        self.assertEqual(sent, [])
+
+    def test_earthquake_is_still_dispatched(self):
+        info = ql.encode_varint((1 << 3) | 5) + struct.pack("<f", 5.8) + ql.field_bytes(2, ql.field_double(1, 6.4) + ql.field_double(2, -75.5))
+        quake = ql.field_bytes(2, ql.field_bytes(1, ql.field_str(1, "EAlert_1")) + ql.field_varint(3, 5) +
+                               ql.field_bytes(14, ql.field_bytes(1, info)))
+        sent = []
+        ql._handle_data_message(self._client(), self._stanza(quake, gcms="quake"), sent.append)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0]["magnitude"], 5.8)
+        self.assertIsNone(sent[0]["crisis"])
+
+    def test_same_persistent_id_different_payload_is_not_a_redelivery(self):
+        c = self._client()
+        self.assertTrue(c.register_persistent_id("CRISIS", b"alert one"))
+        self.assertTrue(c.register_persistent_id("CRISIS", b"alert two"))
+        self.assertFalse(c.register_persistent_id("CRISIS", b"alert one"))
 
 if __name__ == "__main__":
     unittest.main()
