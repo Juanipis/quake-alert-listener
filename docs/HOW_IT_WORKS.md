@@ -228,10 +228,36 @@ Earlier analysis assumed Google's cloud server only dispatched earthquake push a
    - `depth_m` (int32, field 3)
    - `origin_time` (timestamp seconds, field 4) -> feeds our precise S-wave ETA calculation!
 5. **Multi-Device Autonomous Fleet (`tools/radar_sismos_global.py`):**
-   Using the Google Checkin API, we don't need physical Android devices. We deployed an autonomous fleet of **22 independent virtual Google Pixel 6** devices multiplexed over non-blocking TLS sockets (~43 MB total RAM) monitoring high-risk subduction zones worldwide:
-   Chile, Philippines, Indonesia, Mexico, Turkey, Greece, Peru, California, Taiwan, Colombia, and Panama.
-6. **Current Status:**
-   Both the single-node listener and the 22-node global fleet are connected live to `mtalk.google.com:5228` with topic subscriptions active, awaiting the first live earthquake alert from Google to capture and log the real wire packet.
+   Using the Google Checkin API, we don't need physical Android devices. A fleet of **22 synthetic Pixel 6** identities stays connected from a Raspberry Pi 4 (~46 MB RAM, one thread multiplexing 22 TLS sockets with per-node frame buffers, so a message split across TLS records never desynchronises the stream). One node per hotspot: Chile, Philippines, Indonesia, Mexico, Turkey, Greece, Peru, California, Taiwan, Colombia and Panama.
+   - **Chosen decoys.** Play Services picks its 3 decoys at random for privacy, and most random level-8 cells are ocean. The fleet instead spreads its 66 decoys over places that matter or that issue many alerts (`DECOY_PLACES`: Colombian cities and volcanoes, US hurricane/tornado/wildfire areas, the Caribbean, Japan, the Philippines, India, Europe…). `--update-decoys` re-assigns them without registering new identities.
+   - **Everything is kept.** Every data message is saved raw (`radar_payloads.jsonl`, base64 + a `protoc --decode_raw`-style tree) before it is interpreted, so the decoder can be improved and re-run later (`--decodificar`, `--reconstruir`).
+   - **Re-sends.** Messages are acknowledged with a SelectiveAck and de-duplicated by persistent_id + payload hash. Telemetry is served on `127.0.0.1:8998/status` (`ultima_novedad` only changes for a new alert or a changed title/zone/type, not for re-sends).
+6. **Crisis alerts share the channel (observed October 9–10, 2026):**
+   The first messages the fleet received were not earthquakes. Google also pushes its **crisis alerts** to the `ea.<cell>` topics, in the same `gmta` format:
+
+   ```
+   DataMessageStanza: category=com.google.android.gms, app_data{gcms: "crisisalerts", wake: "1"},
+                      persistent_id="CRISIS" (always), token=<event id>, ttl=0
+   AlertBatch { Timestamp sent = 1; repeated Alert alerts = 2; }
+   Alert {
+     AlertId id = 1;            // "pa:224397301" (public alert) | "cmid:610b3195d52aaa9e" (SOS)
+     enum mode = 2;             // 3
+     enum type = 3;             // 1 = public alert, 2 = SOS alert, 5 = earthquake
+     Timestamp expires = 5;
+     AlertRegion region = 6;    // compressed S2Polygon (field 3) or a list of S2 cells (field 1)
+     Info info = 7;             // {string event = 1 ("FLOOD"); Duration {seconds = 1} = 2}
+     string query = 8;          // "kgmid=/g/…" (Knowledge Graph entity)
+     repeated Localized text = 9;  // {lang = 1; public {headline = 1, area = 2, sender = 3} = 2 | SOS {title = 2} = 3}
+     Source source = 12;        // {name = 1 ("NOAA" | "SOS_ALERT"); int32 = 2}
+     Timestamp updated = 13;
+   }
+   ```
+
+   They are re-sent on every login while active, and updated in place under the same id (Isaias went from "Hurricane" to "Post-Tropical Cyclone"; Simon's area grew northwards). Their area is a **compressed S2Polygon** (`S2Polygon::EncodeCompressed`, version 4: face runs, then pi/qi coordinates as zig-zagged second derivatives); the radar decodes it in pure Python, checked vertex by vertex against Google's `s2geometry`, and works out which subscribed cell (own or decoy) the alert came through.
+
+   First 18 hours: 7 alerts and their updates — Hurricane Simon (Pacific coast of Mexico), Isaias (US Southeast), US National Weather Service flood watches for Idaho, Tennessee and Georgia/South Carolina and a flash flood warning in Charleston — and no earthquake. Nothing yet from the Colombian, Asian or European cells.
+7. **Current Status:**
+   Both the single-node listener and the fleet are connected live to `mtalk.google.com:5228` with topic subscriptions active. The earthquake path (type 5, field 14) is still decoded from the decompiled code only; the first live earthquake payload is what we are waiting for. `quake_listener.py` ignores crisis alerts (it logs them) so they never trigger earthquake automations.
 
 ### The workaround: a real Android device (optional)
 
