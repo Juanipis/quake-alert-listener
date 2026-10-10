@@ -647,10 +647,11 @@ def generar_flota(force=False):
     if os.path.isfile(FLEET_FILE):
         with open(FLEET_FILE) as f:
             flota = json.load(f)
-    for spot in HOTSPOTS:
+    nuevos = [h for h in HOTSPOTS if force or "android_id" not in flota.get(h["nombre"], {})]
+    log(f"Registering {len(nuevos)} new identities with Google Checkin into {FLEET_FILE} "
+        f"({len(HOTSPOTS) - len(nuevos)} already registered)")
+    for spot in nuevos:
         nombre = spot["nombre"]
-        if not force and "android_id" in flota.get(nombre, {}):
-            continue
         cell = lat_lon_to_s2_cell_token(spot["lat"], spot["lon"], 8)
         aid, tok = checkin_virtual_device(spot["locale"], spot["tz"])
         flota[nombre] = {"android_id": aid, "security_token": tok, "device_model": "Pixel 6 (Android 14)",
