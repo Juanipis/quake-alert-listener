@@ -3,7 +3,7 @@ name: tests
 on:
   push:
     branches: [main]
-    paths: ["quake_listener.py", "android_alert_listener.py", "tests/**", ".github/workflows/tests.yml"]
+    paths: ["quake_listener.py", "android_alert_listener.py", "tools/**", "tests/**", ".github/workflows/tests.yml"]
   pull_request:
 
 permissions:
@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Compile
-        run: python -m py_compile quake_listener.py android_alert_listener.py
+        run: python -m py_compile quake_listener.py android_alert_listener.py tools/radar_sismos_global.py
       - name: Unit tests (offline, standard library only)
         run: python -m unittest discover -s tests -v
       - name: Synthetic AEAS decode + payload preview

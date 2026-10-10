@@ -10,3 +10,5 @@ credentials/
 __pycache__/
 *.pyc
 .DS_Store
+radar_vistos.json
+*.tmp

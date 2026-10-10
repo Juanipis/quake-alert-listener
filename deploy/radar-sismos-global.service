@@ -1,0 +1,33 @@
+# systemd unit for the global fleet of Google alert receivers (tools/radar_sismos_global.py).
+#
+#   sudo useradd --system --no-create-home quake            # if it does not exist yet
+#   sudo install -D -m 0755 tools/radar_sismos_global.py /opt/quake-listener/radar_sismos_global.py
+#   sudo -u quake env RADAR_DATA_DIR=/var/lib/radar-sismos-global \
+#        python3 /opt/quake-listener/radar_sismos_global.py --generate-fleet   # registers the identities
+#   sudo install -m 0644 deploy/radar-sismos-global.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now radar-sismos-global
+#   curl -s 127.0.0.1:8998/status
+
+[Unit]
+Description=Global fleet of Google alert receivers (earthquakes and crisis alerts)
+Documentation=https://github.com/Juanipis/quake-alert-listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quake
+StateDirectory=radar-sismos-global
+Environment=RADAR_DATA_DIR=/var/lib/radar-sismos-global
+Environment=RADAR_LANG=en
+ExecStart=/usr/bin/python3 /opt/quake-listener/radar_sismos_global.py
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
