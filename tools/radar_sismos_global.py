@@ -15,8 +15,9 @@ What arrives on this channel (observed Oct 2026):
     Their area comes as a compressed S2Polygon, decoded here in pure Python.
 
 Files (in RADAR_DATA_DIR, default: this directory):
-  radar_payloads.jsonl              EVERY data message, raw (base64) + protobuf tree
-  sismos_globales_detectados.jsonl  one line per received alert/version (decoded)
+  radar_payloads.jsonl              raw data messages (base64 + protobuf tree), except identical
+                                    copies and periodic re-issues that only change times
+  sismos_globales_detectados.jsonl  one line per new alert or changed version (decoded)
   radar_vistos.json                 fingerprints of processed messages (Google re-sends)
 
 Environment: RADAR_FLEET_FILE (default <data dir>/synthetic_fleet.json), RADAR_DATA_DIR,
@@ -1016,6 +1017,22 @@ def novedad(previo, a):
     return T("zona_antes", x=previo.get("area")) if previo.get("area") != a.get("area") else T("cambio")
 
 
+# Fields that change on every periodic re-issue of the same alert (Google re-issues active crisis
+# alerts every 1-3 h with new times) or that only depend on which node received it.
+CAMPOS_VOLATILES = {"emitida", "actualizada", "lote_enviado", "timestamp_recepcion", "timestamp_iso",
+                    "primera_recepcion", "resumen", "_clave", "usgs", "nodo_receptor", "via", "zona",
+                    "celda_coincidente", "distancia_al_nodo_km", "distancia_celda_poligono_km"}
+
+
+def cambio_material(previo, a):
+    """True if `a` adds information worth writing to disk: a new alert, or any change other than
+    re-issue times / receiving node (title, area, polygon, expiry, magnitude...)."""
+    if previo is None:
+        return True
+    claves = (set(previo) | set(a)) - CAMPOS_VOLATILES
+    return any(previo.get(k) != a.get(k) for k in claves)
+
+
 def marcar_novedad(a, texto):
     """Set ESTADO["ultima_novedad"] (LOCK held). The text must change for Home Assistant to log it."""
     r = a["resumen"] if texto == "nueva" else f"{a['resumen']} ({texto})"
@@ -1337,26 +1354,27 @@ class GestorFlota:
         st = decodificar_stanza(data)
         pid = st["persistent_id"]
         h = huella(st, data)
-        repetido = h in self.vistos
-
-        # 1) ALWAYS save the raw message before interpreting anything
-        registro = {"timestamp_recepcion": time.time(), "timestamp_iso": ahora_iso(), "nodo": nodo.nombre,
-                    "bytes": len(data), "repetido": repetido,
-                    "stanza_b64": base64.b64encode(data).decode(),
-                    "arbol": arbol_protobuf(data),
-                    "raw_data_arbol": arbol_protobuf(st["raw_data"]) if st["raw_data"] else None}
-        try:
-            anexar_jsonl(PAYLOADS_LOG, registro)
-        except Exception as e:
-            log(f"Could not save raw payload: {e}")
-        if pid:
-            nodo.confirmar(pid)
-        if repetido:
+        if h in self.vistos:
+            # identical copy (same send time and content): nothing to keep
+            if pid:
+                nodo.confirmar(pid)
             log(f"Ignoring re-sent message ({nodo.nombre}, pid={pid})")
             return
         self.vistos.append(h)
         try: guardar_vistos(self.vistos)
         except Exception as e: log(f"Could not save fingerprints: {e}")
+
+        registro = {"timestamp_recepcion": time.time(), "timestamp_iso": ahora_iso(), "nodo": nodo.nombre,
+                    "bytes": len(data), "repetido": False,
+                    "stanza_b64": base64.b64encode(data).decode(),
+                    "arbol": arbol_protobuf(data),
+                    "raw_data_arbol": arbol_protobuf(st["raw_data"]) if st["raw_data"] else None}
+
+        def guardar_crudo():
+            try:
+                anexar_jsonl(PAYLOADS_LOG, registro)
+            except Exception as e:
+                log(f"Could not save raw payload: {e}")
 
         claves = ", ".join(sorted(st["app_data"]))
         log(f"Message for {nodo.nombre}: cat={st['category']} from={st['from']} pid={pid} {len(data)} B "
@@ -1365,8 +1383,11 @@ class GestorFlota:
         try:
             alertas = interpretar(st, nodo.nombre, nodo.info)
         except Exception as e:
+            guardar_crudo()          # not understood: the raw copy is all we have
+            if pid: nodo.confirmar(pid)
             log(f"Could not interpret the message (raw copy kept in {os.path.basename(PAYLOADS_LOG)}): {e}")
             return
+        nuevas = []
         for a in alertas:
             a["timestamp_recepcion"] = registro["timestamp_recepcion"]
             a["timestamp_iso"] = registro["timestamp_iso"]
@@ -1376,14 +1397,26 @@ class GestorFlota:
                 if previo and previo.get("timestamp_recepcion"):   # update: keep the first reception time
                     a["primera_recepcion"] = previo.get("primera_recepcion") or previo.get("timestamp_iso")
                 nov = novedad(previo, a)
+                material = cambio_material(previo, a)
                 registrar(a)
                 if nov: marcar_novedad(a, nov)
             if nov:
                 log(f"{'🌋' if es_sismo(a) else '⚠️'} ALERT {a['tipo']}/{a['modo']} [{nov}]: {a['resumen']} | "
                     f"id={a.get('event_id')} | via {a['via']} ({a.get('celda_coincidente')}) | "
                     f"distance to node {a.get('distancia_al_nodo_km')} km")
-            else:
+            elif material:
                 log(f"Update without visible changes: {a.get('event_id')} ({a.get('titulo') or a['tipo']})")
+            else:
+                log(f"Periodic re-issue, not saved: {a.get('event_id')} ({a.get('titulo') or a['tipo']})")
+            if material:
+                nuevas.append(a)
+        # Raw copy only when it carries something new (or nothing we could interpret), so that
+        # --reconstruir still has every distinct version but not every hourly re-issue.
+        if nuevas or not alertas:
+            guardar_crudo()
+        if pid:
+            nodo.confirmar(pid)
+        for a in nuevas:
             guardar_deteccion(a)
             threading.Thread(target=enriquecer, args=(a, nodo.info), daemon=True).start()
 

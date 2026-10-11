@@ -300,6 +300,83 @@ class TestPersistencia(unittest.TestCase):
             self.assertEqual(radar.ESTADO["total_sismos"], 1)
 
 
+def flood_watch(emitida=1791573300, expira=1791633600, titulo="Flood Watch"):
+    """Stanza de una alerta pública como la pa:224397301; emitida/expira cambian en cada reemisión."""
+    gmsz = (fb(1, fs(1, "pa:224397301") + fb(2, fv(1, emitida))) + fv(2, 3) + fv(3, 1) +
+            fb(5, fv(1, expira)) + fb(6, fb(3, b"\x04\x13\x01")) +
+            fb(7, fs(1, "FLOOD") + fb(2, fv(1, 259200))) + fs(8, "kgmid=/g/11p1qgpjq2&wbsk=1") +
+            fb(9, fs(1, "en") + fb(2, fs(1, titulo) + fs(2, "Idaho") + fs(3, "National Weather Service"))) +
+            fb(12, fs(1, "NOAA") + fv(2, 12)))
+    return stanza(fb(2, gmsz), app=[("gcms", b"crisisalerts")], pid="CRISIS")
+
+
+class NodoEscritura:
+    nombre = "Panama - Golfo de Montijo"
+    info = NODO
+
+    def __init__(self):
+        self.mensajes, self.acks = 0, []
+
+    def confirmar(self, pid):
+        self.acks.append(pid)
+
+
+class TestEscrituras(unittest.TestCase):
+    """Google reemite cada 1-3 h las alertas de crisis activas con otra hora: eso no se guarda."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.orig = (radar.PAYLOADS_LOG, radar.DETECCIONES_LOG, radar.VISTOS_FILE, radar.log)
+        radar.PAYLOADS_LOG = os.path.join(self.tmp.name, "p.jsonl")
+        radar.DETECCIONES_LOG = os.path.join(self.tmp.name, "d.jsonl")
+        radar.VISTOS_FILE = os.path.join(self.tmp.name, "v.json")
+        radar.log = lambda *a, **k: None
+        radar.TODOS.clear()
+        radar.ESTADO["ultima_novedad"] = None
+        self.gestor = object.__new__(radar.GestorFlota)
+        self.gestor.vistos = []
+        self.nodo = NodoEscritura()
+
+    def tearDown(self):
+        radar.PAYLOADS_LOG, radar.DETECCIONES_LOG, radar.VISTOS_FILE, radar.log = self.orig
+        self.tmp.cleanup()
+
+    def _lineas(self, ruta):
+        if not os.path.isfile(ruta): return 0
+        with open(ruta) as f: return sum(1 for _ in f)
+
+    def _recibir(self, data):
+        self.gestor.procesar_mensaje(data, self.nodo)
+        return self._lineas(radar.PAYLOADS_LOG), self._lineas(radar.DETECCIONES_LOG)
+
+    def test_copia_identica_no_se_guarda(self):
+        self.assertEqual(self._recibir(flood_watch()), (1, 1))
+        self.assertEqual(self._recibir(flood_watch()), (1, 1))
+        self.assertEqual(self.nodo.acks, ["CRISIS", "CRISIS"])   # se confirma igual
+
+    def test_reemision_con_otra_hora_no_se_guarda(self):
+        self._recibir(flood_watch())
+        self.assertEqual(self._recibir(flood_watch(emitida=1791580000)), (1, 1))
+        self.assertEqual(radar.TODOS["pa:224397301"]["emitida"], 1791580000)   # en memoria sí se actualiza
+        self.assertEqual(len(self.nodo.acks), 2)
+
+    def test_cambio_real_si_se_guarda(self):
+        self._recibir(flood_watch())
+        self.assertEqual(self._recibir(flood_watch(expira=1791700000)), (2, 2))
+        self.assertEqual(self._recibir(flood_watch(titulo="Flood Warning")), (3, 3))
+        self.assertTrue(radar.ESTADO["ultima_novedad"]["resumen_novedad"].endswith("(antes: Flood Watch)"))
+
+    def test_mensaje_sin_alerta_guarda_el_crudo(self):
+        self.assertEqual(self._recibir(stanza(None, app=[("gcms", b"otro")], pid="0:1")), (1, 0))
+
+    def test_cambio_material(self):
+        a = {"event_id": "x", "titulo": "A", "emitida": 1, "nodo_receptor": "N1", "region": {"v": 1}}
+        self.assertTrue(radar.cambio_material(None, a))
+        self.assertFalse(radar.cambio_material(a, dict(a, emitida=2, actualizada=3, nodo_receptor="N2")))
+        self.assertTrue(radar.cambio_material(a, dict(a, region={"v": 2})))
+        self.assertTrue(radar.cambio_material(a, dict(a, expira=9)))
+
+
 
 if __name__ == "__main__":
     unittest.main()
