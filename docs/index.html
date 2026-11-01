@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Quake MCS Listener — earthquake alerts for Home Assistant</title>
-  <meta name="description" content="A single Python file that follows official earthquake early warnings, EMSC, USGS and SGC feeds and your own seismometer, and tells Home Assistant how hard it will shake at your place. Zero dependencies.">
+  <title>Quake MCS Listener — earthquake alerts for any automation</title>
+  <meta name="description" content="A single Python file that follows official earthquake early warnings, Google's Android alerts (no Android device needed), EMSC, USGS and SGC feeds and your own seismometer, and turns each quake into a webhook for anything you automate, with how hard it will shake at your place. Zero dependencies.">
   <meta name="theme-color" content="#030712">
   <link rel="icon" type="image/svg+xml" href="logo.svg">
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -12,7 +12,7 @@
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="Quake MCS Listener">
-  <meta property="og:description" content="Earthquake warnings with local intensity and an S-wave countdown, straight into Home Assistant. Pure Python, zero dependencies.">
+  <meta property="og:description" content="Earthquake warnings with local intensity and an S-wave countdown, as a webhook for anything you automate. No Android device needed. Pure Python, zero dependencies.">
   <meta property="og:url" content="https://juanipis.github.io/quake-alert-listener/">
   <meta property="og:image" content="https://juanipis.github.io/quake-alert-listener/og.png">
   <meta name="twitter:card" content="summary_large_image">
@@ -674,11 +674,11 @@
     <!-- Hero -->
     <section class="wrap hero">
       <div>
-        <p class="eyebrow"><span class="tag">MIT</span> Early warnings → Home Assistant</p>
-        <h1>Earthquake warnings, <span class="soft">straight into your smart home.</span></h1>
+        <p class="eyebrow"><span class="tag">MIT</span> Early warnings → any webhook</p>
+        <h1>Earthquake warnings, <span class="soft">for anything you automate.</span></h1>
         <p class="lede">
-          One Python file that follows official early warnings, a worldwide quake feed and your own seismometer,
-          then tells <b>Home Assistant</b> how hard it will shake at your place and how many seconds you have. No <span class="mono">pip install</span>, about 30&nbsp;MB of RAM.
+          One Python file that follows official early warnings, Google's Android alerts (no Android device needed), worldwide quake feeds and your own seismometer,
+          then tells <b>your smart home, app or server</b> how hard it will shake at your place and how many seconds you have. Home Assistant configs included. No <span class="mono">pip install</span>, about 30&nbsp;MB of RAM.
         </p>
 
         <div class="install card" id="install">
@@ -883,7 +883,7 @@
           <p class="kicker">02 / How it works</p>
           <h2>Push, not polling.</h2>
         </div>
-        <p>Most smart-home quake integrations ask a public API for news every 30 to 60 seconds. With seismic waves, that's often the whole warning window. This one keeps sockets open to the networks that issue warnings and gets told.</p>
+        <p>Most quake integrations ask a public API for news every 30 to 60 seconds. With seismic waves, that's often the whole warning window. This one keeps sockets open to the networks that issue warnings and gets told.</p>
       </div>
 
       <div class="card race reg" id="race" data-reveal>
