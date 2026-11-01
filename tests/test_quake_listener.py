@@ -887,5 +887,65 @@ class CrisisAlertTests(unittest.TestCase):
         self.assertTrue(c.register_persistent_id("CRISIS", b"alert two"))
         self.assertFalse(c.register_persistent_id("CRISIS", b"alert one"))
 
+
+class RealEarthquakeAlertTests(unittest.TestCase):
+    """A real AEAS earthquake alert received over MCS (southern Panama, 2026-10-31, USGS us7000tujf)."""
+
+    def setUp(self):
+        with open(os.path.join(DATA_DIR, "quake_panama_20261031_rawdata.b64")) as f:
+            self.raw = base64.b64decode(f.read())
+
+    def test_real_alert_decodes(self):
+        ev, = ql.decode_earthquake_payload(self.raw)
+        self.assertEqual(ev["alert_id"], "8fad9-2026-10-31T15:50:25.645Z")
+        self.assertEqual(ev["magnitude"], 5.0)
+        self.assertAlmostEqual(ev["lat"], 7.4815, places=3)
+        self.assertAlmostEqual(ev["lon"], -80.2544, places=3)
+        self.assertEqual(ev["depth_km"], 10.0)
+        self.assertEqual((ev["mode"], ev["is_test"]), ("live", False))
+        self.assertIsNone(ev["crisis"])
+
+    def test_origin_keeps_sub_second_precision(self):
+        ev, = ql.decode_earthquake_payload(self.raw)
+        self.assertAlmostEqual(ev["origin_ts"], 1793461820.420, delta=0.005)   # 15:50:20.420 UTC
+
+    def test_issue_time_is_not_used_as_origin(self):
+        ev, = ql.decode_earthquake_payload(self.raw)
+        self.assertAlmostEqual(ev["issued_ts"], 1793461828.486, delta=0.005)   # 8.1 s after the origin
+        self.assertGreater(ev["issued_ts"] - ev["origin_ts"], 5)
+
+    def test_alert_without_origin_does_not_borrow_the_issue_time(self):
+        issued = ql.field_varint(1, 1793461828) + ql.field_varint(2, 486000000)
+        meta = ql.field_str(1, "EAlert_no_origin") + ql.field_bytes(2, issued)
+        info = ql.encode_varint((1 << 3) | 5) + struct.pack("<f", 5.0)
+        ev, = ql.decode_earthquake_payload(ql.field_bytes(2, ql.field_bytes(1, meta) + ql.field_bytes(14, ql.field_bytes(1, info))))
+        self.assertIsNone(ev["origin_ts"])
+        self.assertAlmostEqual(ev["issued_ts"], 1793461828.486, delta=0.001)
+
+    def _with_mode(self, mode):
+        info = ql.encode_varint((1 << 3) | 5) + struct.pack("<f", 6.1) + ql.field_bytes(2, ql.field_double(1, 6.4) + ql.field_double(2, -75.5))
+        alert = ql.field_bytes(1, ql.field_str(1, "EAlert_mode")) + ql.field_varint(2, mode) + ql.field_varint(3, 5)
+        return ql.field_bytes(2, alert + ql.field_bytes(14, ql.field_bytes(1, info)))
+
+    def test_test_mode_alert_is_flagged(self):
+        ev, = ql.decode_earthquake_payload(self._with_mode(2))
+        self.assertEqual((ev["mode"], ev["is_test"]), ("test", True))
+        self.assertTrue(ql.aeas_event(ev)["training"])
+        for live in (0, 3):
+            ev, = ql.decode_earthquake_payload(self._with_mode(live))
+            self.assertFalse(ev["is_test"])
+
+    def _submit_near_epicentre(self, mode):
+        sent = []
+        desk = ql.DetectionDesk(make_args(lat=6.45, lon=-75.5), sent.append)   # ~6 km from the epicentre
+        ev, = ql.decode_earthquake_payload(self._with_mode(mode))
+        ev["origin_ts"] = time.time() - 5
+        desk.submit(ql.aeas_event(ev))
+        return sent
+
+    def test_test_mode_alert_never_reaches_the_webhook(self):
+        self.assertEqual(len(self._submit_near_epicentre(0)), 1)   # the same alert, live, is dispatched
+        self.assertEqual(self._submit_near_epicentre(2), [])
+
 if __name__ == "__main__":
     unittest.main()

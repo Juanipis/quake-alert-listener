@@ -71,7 +71,7 @@ The pattern is the same for every earthquake early-warning system. Near the epic
 - **Times.** *Issued* is the batch timestamp in Google's payload. *Received* is when the radar finished decoding the stanza.
 - **Reference catalogue.** USGS FDSN event service, queried on 1 November 2026. EMSC was used for the event USGS does not list.
 - **Wave arrivals.** Straight-line distance from the hypocentre at a constant speed: Vs 3.5 km/s for crustal events and 4.3 km/s on average for the 162 km deep event. This is an approximation; treat the lead times as accurate to a few seconds.
-- **The listener too.** The same five raw payloads were also fed through `decode_earthquake_payload()` in `quake_listener.py`, the bridge that users run. It recovered every alert ID, magnitude, epicentre and depth correctly. Its `origin_ts` matches the radar's to within 1 s (it keeps whole seconds) and is what drives the S-wave countdown.
+- **The listener too.** The same five raw payloads were also fed through `decode_earthquake_payload()` in `quake_listener.py`, the bridge that users run. It recovered every alert ID, magnitude, epicentre and depth correctly. It also recovers the origin time to the millisecond, which drives the S-wave countdown, and flags Google test alerts so they are never dispatched. The Panama alert is kept as a test fixture.
 
 ## What is deliberately not published
 
