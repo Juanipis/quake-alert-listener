@@ -169,7 +169,9 @@ payload
 
 **Where the schema comes from.** The variable names in the code (`jeim`, `jeik`, `jeif`, `jeig`, `jhom`) are obfuscated class names. That suggests the schema was taken from a decompiled Google Play services build.
 
-**What has been tested.** Synthetic payloads (`--simulate`), 500 rounds of random input and, since October 2026, **five real AEAS earthquake alerts** captured on the wire: the decoder recovers each alert ID, magnitude, epicentre, depth and origin time (to the whole second). See [FIELD_RESULTS.md](FIELD_RESULTS.md).
+**What has been tested.** Synthetic payloads (`--simulate`), 500 rounds of random input and, since October 2026, **five real AEAS earthquake alerts** captured on the wire: the decoder recovers each alert ID, magnitude, epicentre, depth, origin time (to the millisecond) and issue time. One of them is kept as a test fixture (`tests/data/quake_panama_20261031_rawdata.b64`). See [FIELD_RESULTS.md](FIELD_RESULTS.md).
+
+**Alert mode and issue time.** Field `2` of each alert is its mode: `0`/`3` live, `1` silent, `2` test. Test alerts are decoded and logged but never dispatched. Sub-field `2` of the header is when Google *issued* the alert (8–26 s after the origin in October 2026); it is reported as `issued_ts` and is never used as the origin, so a missing origin can never make the S-wave countdown look longer than it is.
 
 **Origin time and alert ID.** Field `1` of each event carries an alert ID (sub-field `3`) and an origin time in milliseconds (sub-field `4`). They are used for deduplication and for the S-wave countdown.
 

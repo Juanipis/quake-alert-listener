@@ -752,10 +752,27 @@ def _crisis_info(ev):
             "languages": len(texts)}
 
 
+# Alert mode (gmta alert field 2), as seen in GMS 26.37.37 and in real alerts (Oct 2026):
+# 0 and 3 = live, 1 = silent, 2 = test. Test alerts are decoded but never dispatched.
+AEAS_MODES = {0: "live", 1: "silent", 2: "test", 3: "live"}
+
+
+def _pb_timestamp(b):
+    """protobuf Timestamp {1 seconds, 2 nanos} -> float seconds, or None."""
+    ts_p = parse_protobuf(b)
+    sec = ts_p.get(1, [(0, None)])[0][1]
+    if not isinstance(sec, (int, float)) or sec <= 0:
+        return None
+    nanos = ts_p.get(2, [(0, 0)])[0][1]
+    return float(sec) + (nanos / 1e9 if isinstance(nanos, int) and 0 <= nanos < 10**9 else 0.0)
+
+
 def _decode_event(ev):
     mag = None
     region = None
-    origin_ts, alert_id = None, None
+    origin_ts, issued_ts, alert_id = None, None, None
+    mode_raw = ev.get(2, [(0, None)])[0][1] if 2 in ev and ev[2][0][0] == 0 else None
+    mode = AEAS_MODES.get(mode_raw, "unknown" if mode_raw is not None else None)
     epicenter_lat, epicenter_lon, radius_km, depth_km = None, None, None, None
 
     # 1. Google Play Services 26.37.37 (gmta) field 14: EarthquakeWrap -> EarthquakeInfo
@@ -784,10 +801,7 @@ def _decode_event(ev):
                     raw_d = gmsr[3][0][1]
                     depth_km = round(raw_d / 1000.0, 1) if isinstance(raw_d, (int, float)) and raw_d > 0 else None
                 if 4 in gmsr:
-                    ts_p = parse_protobuf(gmsr[4][0][1])
-                    sec = ts_p.get(1, [(0, None)])[0][1]
-                    if isinstance(sec, (int, float)) and sec > 0:
-                        origin_ts = float(sec)
+                    origin_ts = _pb_timestamp(gmsr[4][0][1])
 
     # 2. Legacy / alternate field 7 for magnitude
     if mag is None:
@@ -815,11 +829,11 @@ def _decode_event(ev):
         wire, ms = _pb_first(meta_p, 4)
         if wire == 0 and isinstance(ms, int) and 946684800000 <= ms <= 4102444800000:  # 2000..2100
             origin_ts = ms / 1000.0
-        elif origin_ts is None and 2 in meta_p:
-            ts_p = parse_protobuf(meta_p[2][0][1])
-            sec = ts_p.get(1, [(0, None)])[0][1]
-            if isinstance(sec, (int, float)) and sec > 0:
-                origin_ts = float(sec)
+        # Field 2 is when Google *issued* the alert, 8-26 s after the origin in the
+        # October 2026 alerts. Never use it as the origin: the S-wave countdown would
+        # promise more time than there is.
+        if 2 in meta_p and meta_p[2][0][0] == 2:
+            issued_ts = _pb_timestamp(meta_p[2][0][1])
 
     # 4. Impact zone geometry / contours (field 6)
     geom = _pb_bytes(ev, 6)
@@ -856,7 +870,10 @@ def _decode_event(ev):
         "radius_km": radius_km,
         "depth_km": depth_km,
         "origin_ts": origin_ts,
+        "issued_ts": issued_ts,
         "alert_id": alert_id,
+        "mode": mode,
+        "is_test": mode == "test",
         "crisis": _crisis_info(ev),
     }
 
@@ -869,7 +886,7 @@ def aeas_event(ev):
         "origin_ts": ev.get("origin_ts"), "lat": ev.get("lat"), "lon": ev.get("lon"),
         "depth_km": ev.get("depth_km"), "magnitude": ev.get("magnitude"), "magnitude_type": None,
         "region": ev.get("region"), "radius_km": ev.get("radius_km"), "url": None,
-        "final": None, "cancelled": False, "training": False,
+        "final": None, "cancelled": False, "training": bool(ev.get("is_test")),
     }
 
 
