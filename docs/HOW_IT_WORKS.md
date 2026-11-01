@@ -169,7 +169,7 @@ payload
 
 **Where the schema comes from.** The variable names in the code (`jeim`, `jeik`, `jeif`, `jeig`, `jhom`) are obfuscated class names. That suggests the schema was taken from a decompiled Google Play services build.
 
-**What has been tested.** The decoder has only been exercised with synthetic payloads (`--simulate`) and 500 rounds of random input. It has never seen a real alert.
+**What has been tested.** Synthetic payloads (`--simulate`), 500 rounds of random input and, since October 2026, **five real AEAS earthquake alerts** captured on the wire: the decoder recovers each alert ID, magnitude, epicentre, depth and origin time (to the whole second). See [FIELD_RESULTS.md](FIELD_RESULTS.md).
 
 **Origin time and alert ID.** Field `1` of each event carries an alert ID (sub-field `3`) and an origin time in milliseconds (sub-field `4`). They are used for deduplication and for the S-wave countdown.
 
