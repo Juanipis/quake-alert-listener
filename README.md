@@ -2,8 +2,10 @@
 
 # 🌐 Quake MCS Listener
 
-> **Earthquake warnings, straight into your smart home.**
-> One dependency-free Python file that follows official early warnings, worldwide and national quake feeds, and your own seismometer, then tells Home Assistant how hard it will shake at your place and how many seconds you have.
+> **Earthquake warnings, for anything you automate.**
+> One dependency-free Python file that follows official early warnings, Google's Android alerts (no Android device needed), worldwide and national quake feeds, and your own seismometer, then tells your smart home, app or server how hard it will shake at your place and how many seconds you have. One signed webhook per quake; Home Assistant configs included.
+
+<p align="center"><img src="docs/launch/gallery-4-how-it-fits.png" width="760" alt="Every source in, one webhook out: official early warnings, Google Android alerts, EMSC/USGS/SGC and your own seismometer feed one Python bridge that sends a signed webhook to Home Assistant, Node-RED, your app or server, or sirens and lights"></p>
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)

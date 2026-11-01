@@ -23,7 +23,7 @@ Everything needed to launch **Quake MCS Listener** on [Product Hunt](https://www
 
 ## 📝 Description (max 500 chars)
 
-> Open-source bridge that turns earthquake alerts into a webhook for anything you run: smart homes, apps, servers, sirens. It tells you how hard it will shake where you are and how many seconds you have. Official EEW, USGS, EMSC, your own sensor and Google's Android alerts.
+> Open-source bridge that turns earthquake alerts into a webhook for anything you run: smart homes, apps, servers, sirens. It tells you how hard it will shake where you are and how many seconds you have. Official EEW, USGS, EMSC, your own sensor and Google's Android alerts (no Android device needed).
 
 ### The problem
 Most quake integrations (smart-home or otherwise) show a magnitude and a distance, minutes after the fact. To automate something useful you need to know *whether it will shake here, how hard, and how long you have*. Early warnings exist in only a few countries. Google's Android Earthquake Alerts cover far more of the world, but only reach Android phones and have no public API.
@@ -61,7 +61,7 @@ I live in Colombia, where earthquake alerts reach some phones and almost nothing
 What it does:
 - Follows official early warnings (Japan's JMA and China's CENC via Wolfx), the EMSC, USGS and Colombian SGC feeds, your own Raspberry Shake, and Google's Android Earthquake Alerts over Google's push channel.
 - Estimates the intensity at your location and counts down to the S-wave, then sends one signed webhook per quake. Home Assistant configs are included, but anything that accepts a webhook or reads a REST API works.
-- One Python file, zero dependencies, about 30 MB of RAM.
+- One Python file, zero dependencies, about 30 MB of RAM. No Android device needed: it runs on a Raspberry Pi, a server or your laptop.
 
 The part I'm proudest of: we reverse-engineered how Android subscribes to Google's alerts (S2 map cells over the MCS push socket). In October 2026 a Raspberry Pi with no phone attached received 5 real earthquake alerts from Google. USGS confirms 4 of them, and they arrived 0.2 s after Google issued them. Places at the edge of the alert area got ~20 to ~70 s before the strong shaking. Everything is published, including where it gave NO warning: https://github.com/Juanipis/quake-alert-listener/blob/main/docs/FIELD_RESULTS.md
 
@@ -77,14 +77,15 @@ If you live in a seismic zone and automate anything, I'd love you to try it and 
 
 ## 🖼️ Gallery (1270×760)
 
-| # | Image | Status |
+| # | Image | File |
 | :--- | :--- | :--- |
-| 1 | Hero: logo, tagline and the countdown notification ("🚨 Shaking in 18 s") | `docs/og.png` is in the draft now, but it says "straight into your smart home": redo it with the broader positioning, at 1270×760 |
-| 2 | **Proof:** map of the 5 alerts with their USGS IDs, and the "0.2 s after Google" figure | To make, from `docs/field-results/2026-10-aeas-earthquakes.json` |
-| 3 | **Lead time:** alert polygons for Panama on 31 Oct with the blind zone and the +14/+20 s edge | To make, from the same JSON |
-| 4 | Web console (`docs/index.html`) receiving events | Screenshot |
-| 5 | Home Assistant: dashboard card + iPhone notification | Screenshot from the HA config in `homeassistant/` |
-| 6 | Architecture: sources → DetectionDesk → webhook → Home Assistant | To make (simple diagram) |
+| 1 | Hero: "Earthquake warnings, for anything you automate." + webhook card ("🚨 Shaking in 18 s") | `docs/launch/gallery-1-hero.png` |
+| 2 | Proof: the 5 real alerts, USGS IDs, 0.16–0.30 s delay | `docs/launch/gallery-2-field-results.png` |
+| 3 | Lead time: Google's real alert polygons for Panama, 31 Oct (blind zone, +1/+7 s, +14/+20 s) | `docs/launch/gallery-3-lead-time-panama.png` |
+| 4 | How it fits: every source in, one webhook out | `docs/launch/gallery-4-how-it-fits.png` |
+| 5 | Home Assistant dashboard card + phone notification | To take from a real install |
+
+All four are 1270×760 and generated from the published data by `python3 docs/launch/build_gallery.py` (needs a local Chrome). The same script redraws `docs/og.png`.
 
 Optional: a 30–60 s video or GIF of a drill (`curl -X POST http://127.0.0.1:8990/drill`) reaching Home Assistant and turning the lights on.
 
@@ -109,7 +110,8 @@ Optional: a 30–60 s video or GIF of a drill (`curl -X POST http://127.0.0.1:89
 ## ✅ Launch checklist
 
 - [x] Draft created on Product Hunt (2026-11-01): name, tagline, description, GitHub link, Free, 3 launch tags, maker role, first comment. Not scheduled.
-- [ ] Gallery images 2, 3 and 6 made; image 1 redone at 1270×760 with the broader positioning; screenshots 4 and 5 taken.
+- [x] Gallery images 1–4 made (`docs/launch/`), `docs/og.png` redone; README and site say "for anything you automate" and "no Android device needed".
+- [ ] Upload images 1–4 to the draft (replacing the old og.png) and, ideally, a real Home Assistant screenshot.
 - [ ] Clean-machine smoke test: `git clone` → `run.sh` → the web console finds the bridge → `python3 quake_listener.py --simulate` decodes → `curl -X POST http://127.0.0.1:8990/drill` reaches a test webhook.
 - [ ] GitHub repo description updated to match the positioning (it still describes only the Android AEAS client).
 - [ ] Repo topics: add `earthquake-early-warning`, `home-automation`, `open-source`.
