@@ -3263,8 +3263,8 @@ def run_listener(args):
         log("Tip: your base station looks like it is in Colombia; add sgc to --sources "
             "for the Servicio Geologico Colombiano feed.")
     if "mcs" in args.sources:
-        log("Google MCS is experimental: it keeps a push connection to Google, but Google has not "
-            "been observed delivering earthquake alerts to it (see docs/HOW_IT_WORKS.md).")
+        log("Google MCS: listening for Google's Android earthquake alerts for your area (unofficial "
+            "channel; real alerts confirmed in Oct 2026, see docs/FIELD_RESULTS.md). Keep official alerts on.")
     if args.shake_udp:
         _update_source_state("shake", enabled=True)
         ShakeSource(args, desk).start()
@@ -3370,8 +3370,8 @@ def simulate_alert(args=None):
     mag_jeie = field_str(1, "5.4")
     event_jeik = (
         field_bytes(1, field_str(3, "synthetic") + field_varint(4, int(time.time() * 1000))) +
-        field_varint(2, 1) +
-        field_varint(3, 2) +
+        field_varint(2, 0) +                 # mode: live
+        field_varint(3, 5) +                 # type: earthquake
         field_bytes(6, geom_jeif) +
         field_bytes(7, mag_jeie) +
         field_str(8, "Test Region")

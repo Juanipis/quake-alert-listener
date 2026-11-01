@@ -18,7 +18,7 @@ trap TRAP_CLEANUP EXIT INT TERM
 echo ""
 echo "==================================================================="
 echo "  🌍 Quake MCS Listener • Real-Time Earthquake Bridge"
-echo "  Early warnings, quake feeds and your own sensor -> Home Assistant"
+echo "  Early warnings, quake feeds and your own sensor -> any webhook"
 echo "==================================================================="
 echo ""
 
