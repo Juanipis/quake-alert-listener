@@ -1098,6 +1098,19 @@
     }
 
     /* ---------------- Install command ---------------- */
+    // Once a bridge answers, show its own base station on the map and in the form,
+    // unless the visitor has already typed a location here.
+    function adoptBridgeLocation(b) {
+      if (!b || state.locEdited || !Number.isFinite(b.lat) || !Number.isFinite(b.lon)) return;
+      const name = (b.name || DEFAULT_LOC.name).slice(0, 40);
+      if (b.lat === state.loc.lat && b.lon === state.loc.lon && name === state.loc.name) return;
+      state.loc = { name, lat: b.lat, lon: b.lon };
+      $('#loc-lat').value = String(b.lat);
+      $('#loc-lon').value = String(b.lon);
+      $('#loc-name').value = name;
+      renderCommand();
+      placeBase(true);
+    }
     function isDefaultLoc() {
       const { lat, lon, name } = state.loc;
       return lat === 0 && lon === 0 && name === DEFAULT_LOC.name;
@@ -1482,6 +1495,7 @@
     }
 
     function ingest(d) {
+      adoptBridgeLocation(d.location);
       const g = d.google_mcs || {};
       const cur = {
         pings: g.pings_received | 0,
@@ -1853,6 +1867,7 @@
       latEl.setAttribute('aria-invalid', String(!latOk));
       lonEl.setAttribute('aria-invalid', String(!lonOk));
       if (!latOk || !lonOk) return;
+      state.locEdited = true;
       state.loc = { name: $('#loc-name').value.trim() || DEFAULT_LOC.name, lat, lon };
       renderCommand();
       placeBase(true);
