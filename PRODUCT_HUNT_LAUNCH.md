@@ -31,13 +31,13 @@ Most quake integrations (smart-home or otherwise) show a magnitude and a distanc
 ### The solution
 Quake MCS Listener collects every source you can get and turns each report into local impact: an estimated intensity at your base station (the equation USGS ShakeMap uses) and an S-wave countdown. One policy decides what deserves a notification, merges duplicates across sources, escalates only if things get worse, and sends one signed webhook to whatever you run. Home Assistant configs are included.
 
-### What's new: proof with real earthquakes (October 2026)
-With no phone involved, the Google channel received **5 real earthquake alerts** from Google's Android Earthquake Alerts System: Colombia, the Philippines and three off Panama. **USGS confirms 4 of them.** Our delay after Google issued each alert was **0.16–0.30 s**. As with every early-warning system there was no warning right at the epicentre, but the outer alert areas had **~20 s (Panama) to ~70 s (Philippines)** before the strong shaking. Full data, method and limits: [docs/FIELD_RESULTS.md](docs/FIELD_RESULTS.md).
+### What's new: proof with real earthquakes (October–November 2026)
+With no phone involved, the Google channel received **10 real earthquake alerts across 9 earthquakes** from Google's Android Earthquake Alerts System: Colombia (Santander and Tolima), the Philippines, El Salvador and five off Panama. **Official catalogues confirm 7 of the 9 earthquakes (8 of the 10 alerts)** via USGS and EMSC (MARN, IGC). Our delay after Google issued each alert was **0.13–0.30 s**. As with every early-warning system there was no warning right at the epicentre, but in the shallow M5.4/M5.6 Tolima, Colombia quake on Nov 3 (`us7000tv4i`, first alert 14.0 s after rupture) cities got **~10–12 s (Ibagué), ~19–28 s (Armenia/Pereira/Cali) and ~40–42 s (Bogotá)** before the S-wave, and outer alert areas had **~20 s (Panama) to ~70 s (Philippines)**. Full data, method and limits: [docs/FIELD_RESULTS.md](docs/FIELD_RESULTS.md).
 
 ### Key highlights
 - **🌍 Works anywhere, as a complement:** official early warnings where they exist (Japan, mainland China), EMSC and USGS worldwide, Colombia's SGC, your own Raspberry Shake, and Google's Android alerts over its push channel.
 - **📍 Local impact, not just magnitude:** estimated intensity (MMI) at your place and a countdown to the S-wave.
-- **🧪 Verified on real data:** 5 real Google alerts decoded, 4 matched to USGS, and one kept as a test fixture. 93 tests, CI on Python 3.8–3.13.
+- **🧪 Verified on real data:** 10 real Google alerts (9 quakes) decoded, 8 alerts (7 quakes) matched to USGS/EMSC, and one kept as a test fixture. 93 tests, CI on Python 3.8–3.13.
 - **🛡️ Safe defaults:** Google test alerts and crisis alerts (hurricanes, floods) are logged but never trigger your earthquake automations. A missing origin time never stretches the countdown.
 - **⚡ Zero dependencies:** one Python file on the standard library, about 30 MB of RAM.
 - **🏠 Home Assistant native:** signed webhooks, REST sensors, a countdown automation ("🚨 Shaking in 18 s") and a dashboard card.
@@ -47,7 +47,7 @@ With no phone involved, the Google channel received **5 real earthquake alerts**
 - **Not a certified warning system.** Keep the official alerts on your phone switched on.
 - **The Google channel is unofficial.** It was reverse-engineered, and Google can change or close it at any time. That is exactly why it is one source among several.
 - **There is a blind zone.** Near the epicentre the strong shaking arrives before any alert can, for every system, including Google's. Deep quakes are harder (see the Santander case in the field results).
-- **Five events is a small sample.** It is enough to prove the pipeline works end to end, not to promise performance in a large quake.
+- **Nine earthquakes (ten alerts) is still a modest sample.** It is enough to prove the pipeline works end to end across multiple countries, not to promise performance in a major M7+ quake.
 
 ---
 
@@ -63,7 +63,7 @@ What it does:
 - Estimates the intensity at your location and counts down to the S-wave, then sends one signed webhook per quake. Home Assistant configs are included, but anything that accepts a webhook or reads a REST API works.
 - One Python file, zero dependencies, about 30 MB of RAM. No Android device needed: it runs on a Raspberry Pi, a server or your laptop.
 
-The part I'm proudest of: we reverse-engineered how Android subscribes to Google's alerts (S2 map cells over the MCS push socket). In October 2026 a Raspberry Pi with no phone attached received 5 real earthquake alerts from Google. USGS confirms 4 of them, and they arrived 0.2 s after Google issued them. Places at the edge of the alert area got ~20 to ~70 s before the strong shaking. Everything is published, including where it gave NO warning: https://github.com/Juanipis/quake-alert-listener/blob/main/docs/FIELD_RESULTS.md
+The part I'm proudest of: we reverse-engineered how Android subscribes to Google's alerts (S2 map cells over the MCS push socket). Between October and November 2026 a Raspberry Pi with no phone attached received 10 real earthquake alerts across 9 earthquakes from Google. Official catalogues (USGS and national agencies via EMSC) confirm 7 of the 9 earthquakes (8 of the 10 alerts), and they arrived 0.13–0.30 s after Google issued them. In the shallow M5.4/M5.6 Tolima, Colombia quake on Nov 3, the first alert arrived 14.0 s after rupture (~10–42 s before the S-wave across central Colombian cities), and outer alert areas in Panama and the Philippines got ~20 to ~70 s before the strong shaking. Everything is published, including where it gave NO warning: https://github.com/Juanipis/quake-alert-listener/blob/main/docs/FIELD_RESULTS.md
 
 Please treat it as an extra layer, not your only one: it's unofficial, Google can change the channel, and no system can warn you right at the epicentre. Keep your phone's official alerts on.
 
@@ -80,7 +80,7 @@ If you live in a seismic zone and automate anything, I'd love you to try it and 
 | # | Image | File |
 | :--- | :--- | :--- |
 | 1 | Hero: "Earthquake warnings, for anything you automate." + webhook card ("🚨 Shaking in 18 s") | `docs/launch/gallery-1-hero.png` |
-| 2 | Proof: the 5 real alerts, USGS IDs, 0.16–0.30 s delay | `docs/launch/gallery-2-field-results.png` |
+| 2 | Proof: 10 real alerts across 9 quakes, USGS/EMSC IDs, 0.13–0.30 s delay | `docs/launch/gallery-2-field-results.png` |
 | 3 | Lead time: Google's real alert polygons for Panama, 31 Oct (blind zone, +1/+7 s, +14/+20 s) | `docs/launch/gallery-3-lead-time-panama.png` |
 | 4 | How it fits: every source in, one webhook out | `docs/launch/gallery-4-how-it-fits.png` |
 | 5 | Home Assistant dashboard card + phone notification | To take from a real install |
@@ -97,9 +97,9 @@ Optional: a 30–60 s video or GIF of a drill (`curl -X POST http://127.0.0.1:89
 
 **Does it replace my phone's alerts?** No. Keep them on. This adds automation: lights, sirens, gas valves, announcements.
 
-**How fast is it?** Our part takes about 0.2 s after Google issues an alert. Google issued its alerts 8 to 26 s after its own origin estimate; measured against the USGS origin, they arrived 10 to 40 s after the quake. How much warning you get depends on your distance to the epicentre: none right above it, tens of seconds farther away.
+**How fast is it?** Our part takes 0.13–0.30 s after Google issues an alert. Google issued its alerts 5 to 37 s after its own origin estimate; measured against the reference origin, they arrived 10 to 40 s after the quake (14.0 s for the first packet in the 3 Nov M5.4/M5.6 Tolima, Colombia earthquake). How much warning you get depends on your distance to the epicentre: none right above it, tens of seconds farther away.
 
-**What about false alarms?** Google test alerts and crisis alerts are filtered out, and the same quake from several sources produces one notification. One of the five alerts has no catalogue match yet; it is reported as unconfirmed.
+**What about false alarms?** Google test alerts and crisis alerts are filtered out, and the same quake from several sources produces one notification. Two of the ten alerts (both off southern Panama) have no close catalogue match yet; they are reported as unconfirmed.
 
 **Which countries?** EMSC and USGS cover the whole world. Official early warnings are available for Japan and mainland China. Google's alerts reach the regions where Google runs them (a growing list, Colombia included).
 
