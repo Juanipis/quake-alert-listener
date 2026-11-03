@@ -109,29 +109,48 @@ def hero(w, h, gallery=True):
 
 
 def proof(data):
+    places = {
+        "8e683": "Santander, Colombia",
+        "32f7b": "Mindanao, Philippines",
+        "8fadf": "Southern Panama",
+        "8fae1": "South of Panama",
+        "8fad9": "Southern Panama",
+        "8f62b": "Western El Salvador",
+        "8e397": "Tolima, Colombia (2 alerts)",
+        "8fb1d": "Southern Panama",
+    }
     rows = []
     for e in data["events"]:
-        g, u = e["google"], e["usgs"]
+        eid = e["google_event_id"]
+        if eid.startswith("8e491"):
+            continue  # second alert ID for the same 2026-11-03 Tolima earthquake
+        g, u, emsc = e["google"], e["usgs"], e.get("emsc_candidate")
         when = g["origin_utc"][:10]
-        place = {"8e683": "Santander, Colombia", "32f7b": "Mindanao, Philippines", "8fadf": "Southern Panama",
-                 "8fae1": "South of Panama", "8fad9": "Southern Panama"}[e["google_event_id"][:5]]
-        ref = (f'<span class="ok">✓ USGS {u["id"]}</span> <span class="soft">M{u["magnitude"]}</span>' if u
-               else '<span class="warn">? no catalogue match</span>')
+        place = places[eid[:5]]
+        mag = f"M{g['initial_magnitude']}→{g['final_magnitude']}" if g.get("final_magnitude") else (
+              f"M{g['initial_magnitude']}→{g['magnitude']}" if g.get("initial_magnitude") else f"M{g['magnitude']}")
+        if u:
+            extra = " (SGC M5.6)" if u["id"] == "us7000tv4i" else ""
+            ref = f'<span class="ok">✓ USGS {u["id"]}</span> <span class="soft">M{u["magnitude"]}{extra}</span>'
+        elif emsc and e["reference"].startswith("EMSC"):
+            ref = f'<span class="ok">✓ EMSC/{emsc["author"]} {emsc["id"]}</span> <span class="soft">M{emsc["magnitude"]}</span>'
+        else:
+            ref = '<span class="warn">? no close catalogue match</span>'
         rows.append(f"""<tr><td class="mono soft">{when}</td><td>{html.escape(place)}</td>
-            <td class="mono">M{g['magnitude']}</td><td class="mono" style="font-size:15px">{ref}</td>
+            <td class="mono">{mag}</td><td class="mono" style="font-size:14px">{ref}</td>
             <td class="mono cy" style="text-align:right">{e['latency']['received_after_google_issue_s']:.2f} s</td></tr>""")
-    css = """table{width:100%;border-collapse:collapse;font-size:19px} td{padding:13px 10px;border-top:1px solid var(--line)}
-             tr:first-child td{border-top:0} th{font-family:'Geist Mono',monospace;font-size:12px;color:var(--dim);letter-spacing:.08em;
-             text-align:left;font-weight:500;padding:0 10px 10px}"""
-    stat = lambda big, small, cls="": (f'<div class="card" style="padding:20px 24px;flex:1"><div class="{cls}" style="font-size:40px;'
-                                       f'font-weight:700;letter-spacing:-.02em">{big}</div><div class="mono soft" style="font-size:14px;margin-top:6px">{small}</div></div>')
-    body = f"""<div class="wrap">
-      <div class="kicker">FIELD RESULTS · OCTOBER 2026</div>
-      <h1 style="font-size:52px;margin-top:14px">5 real earthquake alerts from Google.<br><span class="soft">No Android device. Just a Raspberry Pi.</span></h1>
-      <div style="display:flex;gap:16px;margin-top:30px">
-        {stat('4 / 5', 'confirmed by USGS', 'ok')}{stat('0.16–0.30 s', 'after Google issued each alert', 'cy')}{stat('up to ~70 s', 'before the S-wave, at the alert edge')}
+    css = """table{width:100%;border-collapse:collapse;font-size:15.5px} td{padding:7.5px 10px;border-top:1px solid var(--line)}
+             tr:first-child td{border-top:0} th{font-family:'Geist Mono',monospace;font-size:11px;color:var(--dim);letter-spacing:.08em;
+             text-align:left;font-weight:500;padding:0 10px 8px}"""
+    stat = lambda big, small, cls="": (f'<div class="card" style="padding:15px 22px;flex:1"><div class="{cls}" style="font-size:34px;'
+                                       f'font-weight:700;letter-spacing:-.02em">{big}</div><div class="mono soft" style="font-size:13px;margin-top:4px">{small}</div></div>')
+    body = f"""<div class="wrap" style="padding:42px 64px">
+      <div class="kicker">FIELD RESULTS · OCT–NOV 2026</div>
+      <h1 style="font-size:44px;margin-top:10px">10 real earthquake alerts from Google.<br><span class="soft">9 earthquakes. No Android device. Just a Raspberry Pi.</span></h1>
+      <div style="display:flex;gap:16px;margin-top:20px">
+        {stat('7 / 9 quakes', 'confirmed by USGS / EMSC (8/10 alerts)', 'ok')}{stat('0.13–0.30 s', 'after Google issued each alert', 'cy')}{stat('up to ~70 s', 'before S-wave (~10–42 s in 3 Nov M5.4)')}
       </div>
-      <div class="card" style="margin-top:22px;padding:18px 18px 8px">
+      <div class="card" style="margin-top:16px;padding:14px 16px 6px">
         <table><tr><th>DATE (UTC)</th><th>WHERE</th><th>GOOGLE</th><th>CHECKED AGAINST</th><th style="text-align:right">OUR DELAY</th></tr>{''.join(rows)}</table>
       </div>
     </div>"""

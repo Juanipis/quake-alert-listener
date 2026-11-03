@@ -978,7 +978,7 @@
           <div class="src"><span class="src-k ok">live</span><h4>USGS &amp; SGC feeds</h4><p>USGS worldwide and Colombia's SGC catalogue, polled with HTTP 304 caching so an idle feed costs almost nothing.</p><dl><dt>Speed</dt><dd>minutes</dd><dt>Where</dt><dd>Worldwide · Colombia</dd></dl></div>
           <div class="src"><span class="src-k ok">ready</span><h4>Your own sensor</h4><p>A Raspberry Shake streams over UDP; an STA/LTA trigger catches the P-wave on site. Tested with synthetic signals.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Anywhere</dd></dl></div>
           <div class="src"><span class="src-k wait">trial</span><h4>Android sentinel</h4><p>Optional: a real or containerized Android forwards Google's alert to the bridge. Tried in Oct 2026: no real alert captured; paused.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Where Google alerts</dd></dl></div>
-          <div class="src"><span class="src-k ok">live</span><h4>Google MCS socket</h4><p>Direct Google AEAS push client with S2 Level 8 cell subscriptions (Field 29). A 22-node fleet listens to 88 cells; in October 2026 it received its first 5 real earthquake alerts (Colombia, Philippines, Panama; 4 confirmed by USGS), about 0.2&nbsp;s after Google issued them. Crisis alerts (hurricanes, floods) are logged but never treated as earthquakes. <a href="https://github.com/Juanipis/quake-alert-listener/blob/main/docs/FIELD_RESULTS.md">Field results</a>.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Worldwide (AEAS cells)</dd></dl></div>
+          <div class="src"><span class="src-k ok">live</span><h4>Google MCS socket</h4><p>Direct Google AEAS push client with S2 Level 8 cell subscriptions (Field 29). A 22-node fleet listens to 88 cells; in October–November 2026 it received 10 real earthquake alerts across 9 quakes (Colombia, Philippines, El Salvador, Panama; 7 quakes confirmed by USGS/EMSC), 0.13–0.30&nbsp;s after Google issued them. Crisis alerts (hurricanes, floods) are logged but never treated as earthquakes. <a href="https://github.com/Juanipis/quake-alert-listener/blob/main/docs/FIELD_RESULTS.md">Field results</a>.</p><dl><dt>Speed</dt><dd>seconds</dd><dt>Where</dt><dd>Worldwide (AEAS cells)</dd></dl></div>
         </div>
       </div>
     </section>
@@ -989,7 +989,7 @@
         <div>
           <p class="kicker" style="color:var(--amber)">03 / Where it stands</p>
           <h2>Honest status: early warnings where they exist.</h2>
-          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you on-site P-wave triggers anywhere. EMSC, USGS and SGC report every quake minutes later. Google's Android Earthquake Alerts are monitored via direct MCS socket with S2 Level 8 cell subscriptions (Field 29) and a 22-node fleet; it has received real earthquake alerts (5 in October 2026, 4 confirmed by USGS) as well as Google crisis alerts (hurricanes, US flood warnings), which share the channel and are filtered out of the earthquake path. Intensities follow Allen, Wald &amp; Worden (2012).</p>
+          <p>Official early warnings reach the bridge in seconds where agencies publish them (Japan, mainland China). A Raspberry Shake gives you on-site P-wave triggers anywhere. EMSC, USGS and SGC report every quake minutes later. Google's Android Earthquake Alerts are monitored via direct MCS socket with S2 Level 8 cell subscriptions (Field 29) and a 22-node fleet; it has received real earthquake alerts (10 alerts across 9 quakes in Oct–Nov 2026, 7 confirmed by USGS/EMSC) as well as Google crisis alerts (hurricanes, US flood warnings), which share the channel and are filtered out of the earthquake path. Intensities follow Allen, Wald &amp; Worden (2012).</p>
           <div class="status-ctas">
             <a class="btn btn-primary" href="https://github.com/Juanipis/quake-alert-listener/issues/new" target="_blank" rel="noopener">Report what you see</a>
             <a class="btn btn-ghost" href="https://github.com/Juanipis/quake-alert-listener" target="_blank" rel="noopener"><svg class="i"><use href="#i-github"/></svg>Read the code</a>
@@ -1001,7 +1001,7 @@
           <li><svg class="i ok"><use href="#i-check"/></svg>Intensity + S-wave countdown<span>53 tests passing</span></li>
           <li><svg class="i ok"><use href="#i-check"/></svg>Raspberry Shake trigger<span>synthetic signals</span></li>
           <li><svg class="i wait"><use href="#i-check"/></svg>Android sentinel (Redroid)<span>no real alert yet</span></li>
-          <li><svg class="i ok"><use href="#i-check"/></svg>Google MCS socket (Field 29)<span>live: 5 real quake alerts (Oct 2026)</span></li>
+          <li><svg class="i ok"><use href="#i-check"/></svg>Google MCS socket (Field 29)<span>live: 10 real quake alerts (Oct–Nov 2026)</span></li>
         </ul>
       </div>
     </section>
