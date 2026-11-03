@@ -113,7 +113,7 @@ Optional: a 30–60 s video or GIF of a drill (`curl -X POST http://127.0.0.1:89
 - [x] Gallery images 1–4 made (`docs/launch/`), `docs/og.png` redone; README and site say "for anything you automate" and "no Android device needed".
 - [ ] Upload images 1–4 to the draft (replacing the old og.png) and, ideally, a real Home Assistant screenshot.
 - [ ] Clean-machine smoke test: `git clone` → `run.sh` → the web console finds the bridge → `python3 quake_listener.py --simulate` decodes → `curl -X POST http://127.0.0.1:8990/drill` reaches a test webhook.
-- [ ] GitHub repo description updated to match the positioning (it still describes only the Android AEAS client).
+- [x] GitHub repo description updated to match the positioning and credit Google Antigravity (AGY), Gemini 3.8 Flash & Claude Opus 5.5.
 - [ ] Repo topics: add `earthquake-early-warning`, `home-automation`, `open-source`.
 - [ ] Launch on a Tuesday to Thursday at **12:01 AM Pacific** (2:01 AM in Colombia); have the first comment ready to post.
 - [ ] Block out the launch day to answer every comment, honestly and with links to the field results.

@@ -1,7 +1,7 @@
 # ==============================================================================
 # Quake MCS Listener - Zero-Install One-Line Bridge for Windows (PowerShell)
 # Runs the lightweight earthquake listener without manual Python installation
-# Built with Google Antigravity (AGY) & Gemini 3.8 Flash (Thinking High)
+# Built with Google Antigravity (AGY), Gemini 3.8 Flash & Claude Opus 5.5
 # ==============================================================================
 
 param(
