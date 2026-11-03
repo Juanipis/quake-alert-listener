@@ -242,8 +242,7 @@ Webhooks are sent from a background thread (so no source ever stalls) and retrie
 ## 🤖 Build Acknowledgments
 
 This project was developed collaboratively using:
-- **Google Antigravity (AGY)** and **Gemini 3.8 Flash (Thinking High)**: the original MCS client, protobuf decoder and first web app.
-- **Claude Opus 5.5** (Anthropic, via Claude Code): the v2 detection pipeline (official EEW feeds, EMSC, USGS and SGC, Raspberry Shake on-site trigger, intensity estimate and S-wave countdown), the protocol research in `docs/HOW_IT_WORKS.md`, the security hardening, the test suite, and the redesigned web app and logo.
+- **Google Antigravity (AGY)**, **Gemini 3.8 Flash** and **Claude Opus 5.5**: the MCS push client, S2 cell projection & synthetic radar fleet, protobuf/S2Polygon decoders, multi-source v2 detection pipeline (Wolfx EEW, EMSC, USGS, SGC, Raspberry Shake STA/LTA, intensity attenuation and S-wave countdown), deep protocol research in `docs/HOW_IT_WORKS.md` and `docs/FIELD_RESULTS.md`, security hardening, 93-test suite, and the interactive web console.
 
 Earthquake data: [Wolfx](https://wolfx.jp), relaying the Japan Meteorological Agency and the China Earthquake Networks Center; [EMSC](https://www.seismicportal.eu) (CC BY 4.0); [USGS](https://earthquake.usgs.gov/earthquakes/feed/) (public domain); [Servicio Geológico Colombiano](https://www.sgc.gov.co). Intensity model: Allen, T. I., Wald, D. J. & Worden, C. B. (2012), *Intensity attenuation for active crustal regions*, J. Seismology 16, 409–433.
 
