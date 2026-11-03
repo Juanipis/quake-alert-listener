@@ -11,7 +11,7 @@
 [![Dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Compatible-41BDF5.svg)](https://www.home-assistant.io/)
 [![tests](https://github.com/Juanipis/quake-alert-listener/actions/workflows/tests.yml/badge.svg)](https://github.com/Juanipis/quake-alert-listener/actions/workflows/tests.yml)
-[![Built with AGY, Gemini & Claude](https://img.shields.io/badge/Built%20with-AGY%20%C2%B7%20Gemini%203.8%20Flash%20%C2%B7%20Claude%20Opus%205.5-8A2BE2.svg)](#-build-acknowledgments)
+[![Built with AGY, Gemini, Claude Code & Claude Opus 5.5](https://img.shields.io/badge/Built%20with-AGY%20%C2%B7%20Gemini%203.8%20Flash%20%C2%B7%20Claude%20Code%20%C2%B7%20Claude%20Opus%205.5-8A2BE2.svg)](#-build-acknowledgments)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 ---
@@ -242,7 +242,7 @@ Webhooks are sent from a background thread (so no source ever stalls) and retrie
 ## 🤖 Build Acknowledgments
 
 This project was developed collaboratively using:
-- **Google Antigravity (AGY)**, **Gemini 3.8 Flash** and **Claude Opus 5.5**: the MCS push client, S2 cell projection & synthetic radar fleet, protobuf/S2Polygon decoders, multi-source v2 detection pipeline (Wolfx EEW, EMSC, USGS, SGC, Raspberry Shake STA/LTA, intensity attenuation and S-wave countdown), deep protocol research in `docs/HOW_IT_WORKS.md` and `docs/FIELD_RESULTS.md`, security hardening, 93-test suite, and the interactive web console.
+- **Google Antigravity (AGY)**, **Gemini 3.8 Flash**, **Claude Code** and **Claude Opus 5.5**: the MCS push client, S2 cell projection & synthetic radar fleet, protobuf/S2Polygon decoders, multi-source v2 detection pipeline (Wolfx EEW, EMSC, USGS, SGC, Raspberry Shake STA/LTA, intensity attenuation and S-wave countdown), deep protocol research in `docs/HOW_IT_WORKS.md` and `docs/FIELD_RESULTS.md`, security hardening, 93-test suite, and the interactive web console.
 
 Earthquake data: [Wolfx](https://wolfx.jp), relaying the Japan Meteorological Agency and the China Earthquake Networks Center; [EMSC](https://www.seismicportal.eu) (CC BY 4.0); [USGS](https://earthquake.usgs.gov/earthquakes/feed/) (public domain); [Servicio Geológico Colombiano](https://www.sgc.gov.co). Intensity model: Allen, T. I., Wald, D. J. & Worden, C. B. (2012), *Intensity attenuation for active crustal regions*, J. Seismology 16, 409–433.
 
