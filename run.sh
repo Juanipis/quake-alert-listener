@@ -2,7 +2,7 @@
 # ==============================================================================
 # Quake MCS Listener - Zero-Install One-Line Bridge (macOS / Linux)
 # Runs the lightweight earthquake listener in a temporary session without git clone
-# Built with Google Antigravity (AGY), Gemini 3.8 Flash & Claude Opus 5.5
+# Built with Google Antigravity (AGY), Gemini 3.8 Flash, Claude Code & Claude Opus 5.5
 # ==============================================================================
 
 set -e
