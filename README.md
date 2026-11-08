@@ -257,3 +257,7 @@ This is an independent, non-profit open-source project created for research, civ
 ## ⚖️ License
 
 Distributed under the **MIT License**. See [LICENSE](LICENSE) for more information.
+
+---
+
+Made by [Juanipis](https://github.com/Juanipis) · [juanipis.xyz](https://juanipis.xyz)
