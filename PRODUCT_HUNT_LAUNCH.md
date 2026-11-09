@@ -1,0 +1,129 @@
+# 🚀 Product Hunt Launch Kit • Quake MCS Listener
+
+Everything needed to launch **Quake MCS Listener** on [Product Hunt](https://www.producthunt.com/posts/new). Every claim below matches the README, [docs/FIELD_RESULTS.md](docs/FIELD_RESULTS.md) and the code; keep it that way when editing.
+
+**Positioning in one sentence:** an extra layer of earthquake alerts for **anything you automate** (a smart home, an app, a server, a siren), anywhere in the world. Add it if you have nothing, or use it to complement what you already have. It is never a replacement for official alerts.
+
+---
+
+## 📌 Core metadata
+
+| Field | Value |
+| :--- | :--- |
+| **Name** | `Quake MCS Listener` |
+| **Tagline** (max 60 chars) | `Earthquake alerts with a countdown, for any automation` |
+| Tagline alternatives | `Earthquake early warnings as a webhook, for anything you run` · `Open-source earthquake early warning for Home Assistant` |
+| **Links** | **Website:** `https://juanipis.github.io/quake-alert-listener/`<br>**GitHub:** `https://github.com/Juanipis/quake-alert-listener` |
+| **Thumbnail** | `docs/logo.svg` (export a 240×240 PNG) |
+| **Gallery** | See [Gallery](#%EF%B8%8F-gallery-1270760) below |
+| **Launch tags** (max 3) | `Open Source`, `Developer Tools`, `Internet of Things` |
+| **Pricing** | `Free / Open Source (MIT)` |
+
+---
+
+## 📝 Description (max 500 chars)
+
+> Open-source bridge that turns earthquake alerts into a webhook for anything you run: smart homes, apps, servers, sirens. It tells you how hard it will shake where you are and how many seconds you have. Official EEW, USGS, EMSC, your own sensor and Google's Android alerts (no Android device needed).
+
+### The problem
+Most quake integrations (smart-home or otherwise) show a magnitude and a distance, minutes after the fact. To automate something useful you need to know *whether it will shake here, how hard, and how long you have*. Early warnings exist in only a few countries. Google's Android Earthquake Alerts cover far more of the world, but only reach Android phones and have no public API.
+
+### The solution
+Quake MCS Listener collects every source you can get and turns each report into local impact: an estimated intensity at your base station (the equation USGS ShakeMap uses) and an S-wave countdown. One policy decides what deserves a notification, merges duplicates across sources, escalates only if things get worse, and sends one signed webhook to whatever you run. Home Assistant configs are included.
+
+### What's new: proof with real earthquakes (October–November 2026)
+With no phone involved, the Google channel received **10 real earthquake alerts across 9 earthquakes** from Google's Android Earthquake Alerts System: Colombia (Santander and Tolima), the Philippines, El Salvador and five off Panama. **Official catalogues confirm 7 of the 9 earthquakes (8 of the 10 alerts)** via USGS and EMSC (MARN, IGC). Our delay after Google issued each alert was **0.13–0.30 s**. As with every early-warning system there was no warning right at the epicentre, but in the shallow M5.4/M5.6 Tolima, Colombia quake on Nov 3 (`us7000tv4i`, first alert 14.0 s after rupture) cities got **~10–12 s (Ibagué), ~19–28 s (Armenia/Pereira/Cali) and ~40–42 s (Bogotá)** before the S-wave, and outer alert areas had **~20 s (Panama) to ~70 s (Philippines)**. Full data, method and limits: [docs/FIELD_RESULTS.md](docs/FIELD_RESULTS.md).
+
+### Key highlights
+- **🌍 Works anywhere, as a complement:** official early warnings where they exist (Japan, mainland China), EMSC and USGS worldwide, Colombia's SGC, your own Raspberry Shake, and Google's Android alerts over its push channel.
+- **📍 Local impact, not just magnitude:** estimated intensity (MMI) at your place and a countdown to the S-wave.
+- **🧪 Verified on real data:** 10 real Google alerts (9 quakes) decoded, 8 alerts (7 quakes) matched to USGS/EMSC, and one kept as a test fixture. 93 tests, CI on Python 3.8–3.13.
+- **🛡️ Safe defaults:** Google test alerts and crisis alerts (hurricanes, floods) are logged but never trigger your earthquake automations. A missing origin time never stretches the countdown.
+- **⚡ Zero dependencies:** one Python file on the standard library, about 30 MB of RAM.
+- **🏠 Home Assistant native:** signed webhooks, REST sensors, a countdown automation ("🚨 Shaking in 18 s") and a dashboard card.
+- **🚀 One-line trial:** `run.sh` / `run.ps1`; Docker Compose or a hardened systemd unit for 24/7.
+
+### Honest limits (say them before anyone asks)
+- **Not a certified warning system.** Keep the official alerts on your phone switched on.
+- **The Google channel is unofficial.** It was reverse-engineered, and Google can change or close it at any time. That is exactly why it is one source among several.
+- **There is a blind zone.** Near the epicentre the strong shaking arrives before any alert can, for every system, including Google's. Deep quakes are harder (see the Santander case in the field results).
+- **Nine earthquakes (ten alerts) is still a modest sample.** It is enough to prove the pipeline works end to end across multiple countries, not to promise performance in a major M7+ quake.
+
+---
+
+## 💬 Maker's first comment
+
+```markdown
+Hey Product Hunt! 👋
+
+I live in Colombia, where earthquake alerts reach some phones and almost nothing else. Quake MCS Listener is my attempt to fix that: one small open-source bridge that gathers every earthquake source it can and turns each quake into a webhook for anything you run (a smart home, an app, a server, a siren), saying how hard it will shake where you are and how many seconds you have.
+
+What it does:
+- Follows official early warnings (Japan's JMA and China's CENC via Wolfx), the EMSC, USGS and Colombian SGC feeds, your own Raspberry Shake, and Google's Android Earthquake Alerts over Google's push channel.
+- Estimates the intensity at your location and counts down to the S-wave, then sends one signed webhook per quake. Home Assistant configs are included, but anything that accepts a webhook or reads a REST API works.
+- One Python file, zero dependencies, about 30 MB of RAM. No Android device needed: it runs on a Raspberry Pi, a server or your laptop.
+
+The part I'm proudest of: we reverse-engineered how Android subscribes to Google's alerts (S2 map cells over the MCS push socket). Between October and November 2026 a Raspberry Pi with no phone attached received 10 real earthquake alerts across 9 earthquakes from Google. Official catalogues (USGS and national agencies via EMSC) confirm 7 of the 9 earthquakes (8 of the 10 alerts), and they arrived 0.13–0.30 s after Google issued them. In the shallow M5.4/M5.6 Tolima, Colombia quake on Nov 3, the first alert arrived 14.0 s after rupture (~10–42 s before the S-wave across central Colombian cities), and outer alert areas in Panama and the Philippines got ~20 to ~70 s before the strong shaking. Everything is published, including where it gave NO warning: https://github.com/Juanipis/quake-alert-listener/blob/main/docs/FIELD_RESULTS.md
+
+Please treat it as an extra layer, not your only one: it's unofficial, Google can change the channel, and no system can warn you right at the epicentre. Keep your phone's official alerts on.
+
+If you live in a seismic zone and automate anything, I'd love you to try it and tell me what you see 🙏
+
+👉 Web console: https://juanipis.github.io/quake-alert-listener/
+👉 Code: https://github.com/Juanipis/quake-alert-listener
+```
+
+---
+
+## 🖼️ Gallery (1270×760)
+
+| # | Image | File |
+| :--- | :--- | :--- |
+| 1 | Hero: "Earthquake warnings, for anything you automate." + webhook card ("🚨 Shaking in 18 s") | `docs/launch/gallery-1-hero.png` |
+| 2 | Proof: 10 real alerts across 9 quakes, USGS/EMSC IDs, 0.13–0.30 s delay | `docs/launch/gallery-2-field-results.png` |
+| 3 | Lead time: Google's real alert polygons for Panama, 31 Oct (blind zone, +1/+7 s, +14/+20 s) | `docs/launch/gallery-3-lead-time-panama.png` |
+| 4 | How it fits: every source in, one webhook out | `docs/launch/gallery-4-how-it-fits.png` |
+| 5 | Home Assistant dashboard card + phone notification | To take from a real install |
+
+All four are 1270×760 and generated from the published data by `python3 docs/launch/build_gallery.py` (needs a local Chrome). The same script redraws `docs/og.png`.
+
+Optional: a 30–60 s video or GIF of a drill (`curl -X POST http://127.0.0.1:8990/drill`) reaching Home Assistant and turning the lights on.
+
+---
+
+## ❓ Prepared answers
+
+**Is it legal / does Google allow it?** It is an independent research and interoperability project. It is not affiliated with Google and ships no Google code. It listens on the same push channel Android uses and receives only the alerts Google already broadcasts to an area. Google can change that at any time, which is why it is never the only source.
+
+**Does it replace my phone's alerts?** No. Keep them on. This adds automation: lights, sirens, gas valves, announcements.
+
+**How fast is it?** Our part takes 0.13–0.30 s after Google issues an alert. Google issued its alerts 5 to 37 s after its own origin estimate; measured against the reference origin, they arrived 10 to 40 s after the quake (14.0 s for the first packet in the 3 Nov M5.4/M5.6 Tolima, Colombia earthquake). How much warning you get depends on your distance to the epicentre: none right above it, tens of seconds farther away.
+
+**What about false alarms?** Google test alerts and crisis alerts are filtered out, and the same quake from several sources produces one notification. Two of the ten alerts (both off southern Panama) have no close catalogue match yet; they are reported as unconfirmed.
+
+**Which countries?** EMSC and USGS cover the whole world. Official early warnings are available for Japan and mainland China. Google's alerts reach the regions where Google runs them (a growing list, Colombia included).
+
+**Do I need Home Assistant?** No. It sends a generic signed webhook and exposes a local REST API; Home Assistant configs are included.
+
+---
+
+## ✅ Launch checklist
+
+- [x] Draft created on Product Hunt (2026-11-01): name, tagline, description, GitHub link, Free, 3 launch tags, maker role, first comment. Not scheduled.
+- [x] Gallery images 1–4 made (`docs/launch/`), `docs/og.png` redone; README and site say "for anything you automate" and "no Android device needed".
+- [ ] Upload images 1–4 to the draft (replacing the old og.png) and, ideally, a real Home Assistant screenshot.
+- [ ] Clean-machine smoke test: `git clone` → `run.sh` → the web console finds the bridge → `python3 quake_listener.py --simulate` decodes → `curl -X POST http://127.0.0.1:8990/drill` reaches a test webhook.
+- [x] GitHub repo description updated to match the positioning and credit Google Antigravity (AGY), Gemini 3.8 Flash, Claude Code & Claude Opus 5.5.
+- [ ] Repo topics: add `earthquake-early-warning`, `home-automation`, `open-source`.
+- [ ] Launch on a Tuesday to Thursday at **12:01 AM Pacific** (2:01 AM in Colombia); have the first comment ready to post.
+- [ ] Block out the launch day to answer every comment, honestly and with links to the field results.
+- [ ] Share in r/homeassistant, the Home Assistant community forum and Colombian tech groups after the launch is live (not before).
+
+---
+
+## 🎨 Design notes for `docs/index.html`
+
+- **Look:** dark slate/navy (`#030712`, `#0a0f1d`), subtle cyan borders, bento grid. Accents: cyan `#38bdf8`, green `#22c55e` (live), amber `#eab308` (trial / research), crimson `#ef4444` (alerts).
+- **Status labels:** `live` only for sources that deliver today (the Google MCS socket now qualifies); `ready` for tested-but-optional hardware; `trial` / `research` (amber) for experiments such as the Android sentinel.
+- **Simulation:** without a bridge, the page plays clearly labelled simulated traffic; once a bridge answers on `127.0.0.1:8990` it switches to live data.
+- **Assets:** `docs/logo.svg` (brand and favicon), `docs/favicon-32.png`, `docs/icon-180.png`, `docs/og.png`.

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>Quake MCS Listener</title>
+  <defs>
+    <linearGradient id="qbg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#121c33"/><stop offset="1" stop-color="#030712"/></linearGradient>
+    <radialGradient id="qglow" cx="0.62" cy="0.42" r="0.55"><stop offset="0" stop-color="#38bdf8" stop-opacity="0.16"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+    <linearGradient id="qp" x1="100" y1="0" x2="404" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#38bdf8" stop-opacity="0.3"/><stop offset="0.4" stop-color="#38bdf8"/><stop offset="1" stop-color="#7dd3fc"/></linearGradient>
+    <linearGradient id="qs" x1="100" y1="0" x2="404" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#22c55e" stop-opacity="0.3"/><stop offset="0.5" stop-color="#22c55e"/><stop offset="1" stop-color="#86efac"/></linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#qbg)"/>
+  <rect width="512" height="512" rx="116" fill="url(#qglow)"/>
+  <rect x="8" y="8" width="496" height="496" rx="108" fill="none" stroke="#cbd5e1" stroke-opacity="0.14" stroke-width="2"/>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="26">
+    <path d="M100 176 L150 176 L176 122 L202 248 L228 136 L254 194 L280 176 L404 176" stroke="url(#qp)"/>
+    <path d="M100 330 L236 330 L263 238 L290 434 L317 270 L344 354 L371 330 L404 330" stroke="url(#qs)"/>
+  </g>
+  <circle cx="404" cy="176" r="9" fill="#f8fafc"/>
+  <circle cx="404" cy="330" r="9" fill="#f8fafc"/>
+</svg>

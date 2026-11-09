@@ -1,0 +1,898 @@
+{
+  "description": "Earthquake alerts from Google's Android Earthquake Alerts System received by tools/radar_sismos_global.py (synthetic fleet, no phone), 2026-10-09 to 2026-11-03.",
+  "excluded_on_purpose": "receiving nodes, fleet identities and credentials, decoy cells, raw stanzas, operator location",
+  "clock": "receiver clock synchronised by NTP (systemd-timesyncd) on a Raspberry Pi 4",
+  "events": [
+    {
+      "google_event_id": "8e683-2026-10-13T21:24:43.738Z",
+      "google": {
+        "issued_utc": "2026-10-13T21:25:01.081Z",
+        "origin_utc": "2026-10-13T21:24:49.521Z",
+        "magnitude": 4.8,
+        "depth_km": 60.0,
+        "lat": 6.7676,
+        "lon": -73.0641,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI3",
+            "vertices": [
+              [
+                6.7607,
+                -72.8387
+              ],
+              [
+                6.9211,
+                -72.8998
+              ],
+              [
+                6.9915,
+                -73.0573
+              ],
+              [
+                6.9307,
+                -73.2188
+              ],
+              [
+                6.7744,
+                -73.2896
+              ],
+              [
+                6.6141,
+                -73.2284
+              ],
+              [
+                6.5437,
+                -73.071
+              ],
+              [
+                6.6044,
+                -72.9096
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 15.6,
+                "s_wave_arrival_s": 37.8,
+                "lead_time_s": -2.5
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 34.4,
+                "s_wave_arrival_s": 38.5,
+                "lead_time_s": -1.8
+              }
+            ]
+          }
+        ]
+      },
+      "received_utc": "2026-10-13T21:25:01.293Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 11.6,
+        "received_after_google_issue_s": 0.21,
+        "received_after_reference_origin_s": 40.3
+      },
+      "reference": "USGS",
+      "usgs": {
+        "id": "us6000u25i",
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us6000u25i",
+        "origin_utc": "2026-10-13T21:24:20.959Z",
+        "magnitude": 4.8,
+        "magnitude_type": "mb",
+        "place": "0 km SW of Cepitá, Colombia",
+        "lat": 6.747,
+        "lon": -72.9793,
+        "depth_km": 161.959
+      },
+      "emsc_candidate": null,
+      "wave_model": {
+        "vs_km_s": 4.3,
+        "vp_km_s": 7.44,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "32f7b-2026-10-27T23:43:59.402Z",
+      "google": {
+        "issued_utc": "2026-10-27T23:44:13.135Z",
+        "origin_utc": "2026-10-27T23:43:47.595Z",
+        "magnitude": 5.8,
+        "depth_km": 54.9,
+        "lat": 5.5317,
+        "lon": 125.3117,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI4",
+            "vertices": [
+              [
+                5.6274,
+                123.976
+              ],
+              [
+                4.6596,
+                124.2998
+              ],
+              [
+                4.2024,
+                125.2143
+              ],
+              [
+                4.5225,
+                126.1857
+              ],
+              [
+                5.4331,
+                126.6471
+              ],
+              [
+                6.4021,
+                126.3267
+              ],
+              [
+                6.8611,
+                125.4096
+              ],
+              [
+                6.5397,
+                124.4348
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 135.9,
+                "s_wave_arrival_s": 42.2,
+                "lead_time_s": 20.4
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 160.6,
+                "s_wave_arrival_s": 48.8,
+                "lead_time_s": 26.9
+              }
+            ]
+          },
+          {
+            "level": "MMI3",
+            "vertices": [
+              [
+                5.726,
+                122.5511
+              ],
+              [
+                3.7281,
+                123.2234
+              ],
+              [
+                2.7849,
+                125.1109
+              ],
+              [
+                3.4451,
+                127.115
+              ],
+              [
+                5.3247,
+                128.0705
+              ],
+              [
+                7.328,
+                127.4128
+              ],
+              [
+                8.2785,
+                125.5145
+              ],
+              [
+                7.6129,
+                123.4957
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 293.9,
+                "s_wave_arrival_s": 85.6,
+                "lead_time_s": 63.7
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 318.6,
+                "s_wave_arrival_s": 92.5,
+                "lead_time_s": 70.7
+              }
+            ]
+          }
+        ]
+      },
+      "received_utc": "2026-10-27T23:44:13.324Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 25.5,
+        "received_after_google_issue_s": 0.19,
+        "received_after_reference_origin_s": 21.8
+      },
+      "reference": "USGS",
+      "usgs": {
+        "id": "us7000ttkk",
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000ttkk",
+        "origin_utc": "2026-10-27T23:43:51.480Z",
+        "magnitude": 5.1,
+        "magnitude_type": "mww",
+        "place": "7 km N of Balangonan, Philippines",
+        "lat": 5.6402,
+        "lon": 125.3536,
+        "depth_km": 57.848
+      },
+      "emsc_candidate": null,
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8fadf-2026-10-29T13:43:01.494Z",
+      "google": {
+        "issued_utc": "2026-10-29T13:43:15.470Z",
+        "origin_utc": "2026-10-29T13:42:57.225Z",
+        "magnitude": 4.5,
+        "depth_km": 10.0,
+        "lat": 7.6401,
+        "lon": -80.5816,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI3",
+            "vertices": [
+              [
+                7.6354,
+                -80.3009
+              ],
+              [
+                7.8335,
+                -80.3797
+              ],
+              [
+                7.9183,
+                -80.5769
+              ],
+              [
+                7.8401,
+                -80.7768
+              ],
+              [
+                7.6447,
+                -80.8623
+              ],
+              [
+                7.4466,
+                -80.7833
+              ],
+              [
+                7.3619,
+                -80.5863
+              ],
+              [
+                7.4401,
+                -80.3865
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 23.3,
+                "s_wave_arrival_s": 7.3,
+                "lead_time_s": -10.4
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 38.5,
+                "s_wave_arrival_s": 11.4,
+                "lead_time_s": -6.3
+              }
+            ]
+          }
+        ]
+      },
+      "received_utc": "2026-10-29T13:43:15.625Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 18.2,
+        "received_after_google_issue_s": 0.16,
+        "received_after_reference_origin_s": 17.7
+      },
+      "reference": "USGS",
+      "usgs": {
+        "id": "us7000ttyw",
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000ttyw",
+        "origin_utc": "2026-10-29T13:42:57.953Z",
+        "magnitude": 4.7,
+        "magnitude_type": "mb",
+        "place": "6 km SE of Pitaloza Arriba, Panama",
+        "lat": 7.5923,
+        "lon": -80.6309,
+        "depth_km": 10
+      },
+      "emsc_candidate": null,
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8fae1-2026-10-29T23:57:13.224Z",
+      "google": {
+        "issued_utc": "2026-10-29T23:57:20.998Z",
+        "origin_utc": "2026-10-29T23:57:04.837Z",
+        "magnitude": 4.5,
+        "depth_km": 8.2,
+        "lat": 7.745,
+        "lon": -81.1191,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI5+",
+            "vertices": [
+              [
+                7.7447,
+                -81.0995
+              ],
+              [
+                7.7585,
+                -81.105
+              ],
+              [
+                7.7644,
+                -81.1188
+              ],
+              [
+                7.7589,
+                -81.1327
+              ],
+              [
+                7.7454,
+                -81.1386
+              ],
+              [
+                7.7316,
+                -81.1331
+              ],
+              [
+                7.7257,
+                -81.1194
+              ],
+              [
+                7.7312,
+                -81.1055
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 2.1,
+                "s_wave_arrival_s": 2.4,
+                "lead_time_s": -13.9
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 2.2,
+                "s_wave_arrival_s": 2.4,
+                "lead_time_s": -13.9
+              }
+            ]
+          },
+          {
+            "level": "MMI3",
+            "vertices": [
+              [
+                7.7405,
+                -80.8336
+              ],
+              [
+                7.9419,
+                -80.9139
+              ],
+              [
+                8.0279,
+                -81.1146
+              ],
+              [
+                7.9482,
+                -81.3179
+              ],
+              [
+                7.7494,
+                -81.4046
+              ],
+              [
+                7.5481,
+                -81.324
+              ],
+              [
+                7.4622,
+                -81.1236
+              ],
+              [
+                7.5418,
+                -80.9205
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 31.5,
+                "s_wave_arrival_s": 9.3,
+                "lead_time_s": -7.0
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 31.5,
+                "s_wave_arrival_s": 9.3,
+                "lead_time_s": -7.0
+              }
+            ]
+          }
+        ]
+      },
+      "received_utc": "2026-10-29T23:57:21.155Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 16.2,
+        "received_after_google_issue_s": 0.16,
+        "received_after_reference_origin_s": 16.3
+      },
+      "reference": "Google (unconfirmed)",
+      "usgs": null,
+      "emsc_candidate": {
+        "origin_utc": "2026-10-29T23:57:26Z",
+        "magnitude": 4.0,
+        "lat": 7.9126,
+        "lon": -82.4964,
+        "depth_km": 52.0,
+        "author": "UNA",
+        "note": "~150 km from Google's epicentre and 22 s later than Google's origin time; not clearly the same event"
+      },
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8fad9-2026-10-31T15:50:25.645Z",
+      "google": {
+        "issued_utc": "2026-10-31T15:50:28.486Z",
+        "origin_utc": "2026-10-31T15:50:20.420Z",
+        "magnitude": 5.0,
+        "depth_km": 10.0,
+        "lat": 7.4815,
+        "lon": -80.2544,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI5+",
+            "vertices": [
+              [
+                7.4798,
+                -80.154
+              ],
+              [
+                7.5507,
+                -80.1822
+              ],
+              [
+                7.581,
+                -80.2527
+              ],
+              [
+                7.5531,
+                -80.3243
+              ],
+              [
+                7.4831,
+                -80.3549
+              ],
+              [
+                7.4122,
+                -80.3267
+              ],
+              [
+                7.3819,
+                -80.2561
+              ],
+              [
+                7.4098,
+                -80.1846
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 1.3,
+                "s_wave_arrival_s": 2.9,
+                "lead_time_s": -7.0
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 20.8,
+                "s_wave_arrival_s": 6.6,
+                "lead_time_s": -3.3
+              }
+            ]
+          },
+          {
+            "level": "MMI4",
+            "vertices": [
+              [
+                7.474,
+                -79.8282
+              ],
+              [
+                7.7751,
+                -79.9477
+              ],
+              [
+                7.9041,
+                -80.2472
+              ],
+              [
+                7.7853,
+                -80.5509
+              ],
+              [
+                7.4885,
+                -80.6807
+              ],
+              [
+                7.1876,
+                -80.5608
+              ],
+              [
+                7.0588,
+                -80.2617
+              ],
+              [
+                7.1774,
+                -79.9584
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 37.2,
+                "s_wave_arrival_s": 11.0,
+                "lead_time_s": 1.1
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 56.8,
+                "s_wave_arrival_s": 16.5,
+                "lead_time_s": 6.6
+              }
+            ]
+          },
+          {
+            "level": "MMI3",
+            "vertices": [
+              [
+                7.4663,
+                -79.4058
+              ],
+              [
+                8.0658,
+                -79.6433
+              ],
+              [
+                8.3229,
+                -80.2399
+              ],
+              [
+                8.0862,
+                -80.8451
+              ],
+              [
+                7.495,
+                -81.1031
+              ],
+              [
+                6.8962,
+                -80.8639
+              ],
+              [
+                6.6401,
+                -80.2689
+              ],
+              [
+                6.876,
+                -79.6654
+              ]
+            ],
+            "lead_time_at_edge": [
+              {
+                "where": "nearest_vertex",
+                "epicentral_km": 83.8,
+                "s_wave_arrival_s": 24.1,
+                "lead_time_s": 14.2
+              },
+              {
+                "where": "farthest_vertex",
+                "epicentral_km": 103.3,
+                "s_wave_arrival_s": 29.7,
+                "lead_time_s": 19.8
+              }
+            ]
+          }
+        ]
+      },
+      "received_utc": "2026-10-31T15:50:28.784Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 8.1,
+        "received_after_google_issue_s": 0.3,
+        "received_after_reference_origin_s": 9.9
+      },
+      "reference": "USGS",
+      "usgs": {
+        "id": "us7000tujf",
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000tujf",
+        "origin_utc": "2026-10-31T15:50:18.909Z",
+        "magnitude": 5.2,
+        "magnitude_type": "mww",
+        "place": "4 km S of Bajo Corral, Panama",
+        "lat": 7.5692,
+        "lon": -80.2547,
+        "depth_km": 10
+      },
+      "emsc_candidate": null,
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8f62b-2026-11-02T11:57:18.424Z",
+      "google": {
+        "issued_utc": "2026-11-02T11:57:22.109Z",
+        "origin_utc": "2026-11-02T11:57:17.353Z",
+        "magnitude": 4.5,
+        "depth_km": 10.0,
+        "lat": 13.8447,
+        "lon": -89.7192,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI3",
+            "vertices": null,
+            "lead_time_at_edge": null
+          }
+        ]
+      },
+      "received_utc": "2026-11-02T11:57:22.271Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 4.8,
+        "received_after_google_issue_s": 0.16,
+        "received_after_reference_origin_s": 22.3
+      },
+      "reference": "EMSC (MARN)",
+      "usgs": null,
+      "emsc_candidate": {
+        "id": "20261102_0000144",
+        "origin_utc": "2026-11-02T11:57:00.000Z",
+        "magnitude": 3.9,
+        "lat": 13.8703,
+        "lon": -89.7395,
+        "depth_km": 4.7,
+        "author": "MARN",
+        "note": "3.6 km from Google's epicentre; confirmed by El Salvador's MARN via EMSC"
+      },
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8fadf-2026-11-02T14:22:36.907Z",
+      "google": {
+        "issued_utc": "2026-11-02T14:22:41.416Z",
+        "origin_utc": "2026-11-02T14:22:27.331Z",
+        "magnitude": 4.5,
+        "depth_km": 10.0,
+        "lat": 7.5367,
+        "lon": -80.8322,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI3",
+            "vertices": null,
+            "lead_time_at_edge": null
+          }
+        ]
+      },
+      "received_utc": "2026-11-02T14:22:41.562Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 14.1,
+        "received_after_google_issue_s": 0.15,
+        "received_after_reference_origin_s": 16.6
+      },
+      "reference": "EMSC (IGC)",
+      "usgs": null,
+      "emsc_candidate": {
+        "id": "20261102_0000183",
+        "origin_utc": "2026-11-02T14:22:25.000Z",
+        "magnitude": 4.2,
+        "lat": 7.6033,
+        "lon": -80.809,
+        "depth_km": 9.0,
+        "author": "IGC",
+        "note": "7.8 km from Google's epicentre; confirmed by Panama's IGC via EMSC"
+      },
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8e397-2026-11-03T09:13:19.735Z",
+      "google": {
+        "issued_utc": "2026-11-03T09:13:31.005Z",
+        "origin_utc": "2026-11-03T09:13:16.036Z",
+        "magnitude": 5.5,
+        "initial_magnitude": 5.3,
+        "final_magnitude": 5.8,
+        "depth_km": 20.6,
+        "lat": 3.8294,
+        "lon": -75.6436,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI5+",
+            "vertices": null,
+            "lead_time_at_edge": null
+          },
+          {
+            "level": "MMI4",
+            "vertices": null,
+            "lead_time_at_edge": null
+          },
+          {
+            "level": "MMI3",
+            "vertices": null,
+            "lead_time_at_edge": null
+          }
+        ]
+      },
+      "first_received_utc": "2026-11-03T09:13:29Z",
+      "received_utc": "2026-11-03T09:13:31.131Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 15.0,
+        "received_after_google_issue_s": 0.13,
+        "received_after_reference_origin_s": 16.2,
+        "first_received_after_reference_origin_s": 14.0
+      },
+      "reference": "USGS",
+      "usgs": {
+        "id": "us7000tv4i",
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000tv4i",
+        "origin_utc": "2026-11-03T09:13:14.972Z",
+        "magnitude": 5.4,
+        "magnitude_type": "mww",
+        "place": "24 km NNW of Rioblanco, Colombia",
+        "lat": 3.7386,
+        "lon": -75.7198,
+        "depth_km": 10.0
+      },
+      "emsc_candidate": null,
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8e491-2026-11-03T09:13:39.223Z",
+      "google": {
+        "issued_utc": "2026-11-03T09:13:44.972Z",
+        "origin_utc": "2026-11-03T09:13:17.704Z",
+        "magnitude": 5.6,
+        "depth_km": 4.2,
+        "lat": 3.8224,
+        "lon": -75.6383,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI5+",
+            "vertices": null,
+            "lead_time_at_edge": null
+          },
+          {
+            "level": "MMI4",
+            "vertices": null,
+            "lead_time_at_edge": null
+          },
+          {
+            "level": "MMI3",
+            "vertices": null,
+            "lead_time_at_edge": null
+          }
+        ]
+      },
+      "received_utc": "2026-11-03T09:13:45.110Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 27.3,
+        "received_after_google_issue_s": 0.14,
+        "received_after_reference_origin_s": 30.1
+      },
+      "reference": "USGS",
+      "usgs": {
+        "id": "us7000tv4i",
+        "url": "https://earthquake.usgs.gov/earthquakes/eventpage/us7000tv4i",
+        "origin_utc": "2026-11-03T09:13:14.972Z",
+        "magnitude": 5.4,
+        "magnitude_type": "mww",
+        "place": "24 km NNW of Rioblanco, Colombia",
+        "lat": 3.7386,
+        "lon": -75.7198,
+        "depth_km": 10.0
+      },
+      "emsc_candidate": null,
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    },
+    {
+      "google_event_id": "8fb1d-2026-11-03T10:35:25.946Z",
+      "google": {
+        "issued_utc": "2026-11-03T10:35:50.188Z",
+        "origin_utc": "2026-11-03T10:35:13.618Z",
+        "magnitude": 4.7,
+        "initial_magnitude": 4.5,
+        "depth_km": 9.4,
+        "lat": 7.2679,
+        "lon": -81.4176,
+        "is_test": false,
+        "alert_contours": [
+          {
+            "level": "MMI5+",
+            "vertices": null,
+            "lead_time_at_edge": null
+          },
+          {
+            "level": "MMI3",
+            "vertices": null,
+            "lead_time_at_edge": null
+          }
+        ]
+      },
+      "first_received_utc": "2026-11-03T10:35:38Z",
+      "received_utc": "2026-11-03T10:35:50.334Z",
+      "latency": {
+        "google_issue_after_google_origin_s": 36.6,
+        "received_after_google_issue_s": 0.15,
+        "received_after_reference_origin_s": 36.7,
+        "first_received_after_reference_origin_s": 24.4
+      },
+      "reference": "Google (unconfirmed)",
+      "usgs": null,
+      "emsc_candidate": {
+        "id": "20261103_0000125",
+        "origin_utc": "2026-11-03T10:35:34.000Z",
+        "magnitude": 4.2,
+        "lat": 8.0234,
+        "lon": -81.9339,
+        "depth_km": 10.0,
+        "author": "UNA",
+        "note": "~101 km from Google's epicentre and 20 s later than Google's origin time; not clearly the same event"
+      },
+      "wave_model": {
+        "vs_km_s": 3.5,
+        "vp_km_s": 6.05,
+        "note": "straight-line hypocentral distance, constant velocity; an approximation"
+      }
+    }
+  ]
+}
