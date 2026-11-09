@@ -13,7 +13,7 @@ Everything needed to launch **Quake MCS Listener** on [Product Hunt](https://www
 | **Name** | `Quake MCS Listener` |
 | **Tagline** (max 60 chars) | `Earthquake alerts with a countdown, for any automation` |
 | Tagline alternatives | `Earthquake early warnings as a webhook, for anything you run` · `Open-source earthquake early warning for Home Assistant` |
-| **Links** | **Website:** `https://juanipis.github.io/quake-alert-listener/`<br>**GitHub:** `https://github.com/Juanipis/quake-alert-listener` |
+| **Links** | **Website:** `https://juanipis.xyz/quake-alert-listener/`<br>**GitHub:** `https://github.com/Juanipis/quake-alert-listener` |
 | **Thumbnail** | `docs/logo.svg` (export a 240×240 PNG) |
 | **Gallery** | See [Gallery](#%EF%B8%8F-gallery-1270760) below |
 | **Launch tags** (max 3) | `Open Source`, `Developer Tools`, `Internet of Things` |
@@ -69,7 +69,7 @@ Please treat it as an extra layer, not your only one: it's unofficial, Google ca
 
 If you live in a seismic zone and automate anything, I'd love you to try it and tell me what you see 🙏
 
-👉 Web console: https://juanipis.github.io/quake-alert-listener/
+👉 Web console: https://juanipis.xyz/quake-alert-listener/
 👉 Code: https://github.com/Juanipis/quake-alert-listener
 ```
 

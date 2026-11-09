@@ -91,11 +91,11 @@ Invoke-WebRequest -Uri $ScriptUrl -OutFile $ListenerFile -UseBasicParsing
 
 Write-Host ""
 Write-Host "🚀 Starting Quake MCS Bridge on http://127.0.0.1:$HttpPort ..." -ForegroundColor Cyan
-Write-Host "🌐 Opening web app in your browser: https://juanipis.github.io/quake-alert-listener/" -ForegroundColor Green
+Write-Host "🌐 Opening web app in your browser: https://juanipis.xyz/quake-alert-listener/" -ForegroundColor Green
 Write-Host "   (The web app will automatically detect this bridge and connect in real-time)" -ForegroundColor Gray
 Write-Host "⌨️  Press Ctrl+C at any time to stop." -ForegroundColor Gray
 Write-Host ""
 
-Start-Process "https://juanipis.github.io/quake-alert-listener/"
+Start-Process "https://juanipis.xyz/quake-alert-listener/"
 
 & $PythonExe $ListenerFile --lat $Lat --lon $Lon --name $Name --ping-interval $PingInterval --http-port $HttpPort
