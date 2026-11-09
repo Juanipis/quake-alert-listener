@@ -762,6 +762,19 @@ class Cli(unittest.TestCase):
                          ("10.0.0.5:8990", True), ("attacker.example", False), ("127.0.0.1.nip.io", False)]:
             self.assertEqual(ql.is_host_allowed(host), ok, host)
 
+    def test_default_origins_cover_the_official_web_console(self):
+        # The console moved to juanipis.xyz (juanipis.github.io now redirects there)
+        default = ql.build_parser().parse_args([]).allowed_origins
+        old = ql.ALLOWED_ORIGINS
+        ql.ALLOWED_ORIGINS = default
+        try:
+            for origin, ok in [("https://juanipis.xyz", True), ("https://juanipis.github.io", True),
+                               ("http://localhost:5173", True), ("https://attacker.example", False),
+                               ("https://juanipis.xyz.attacker.example", False)]:
+                self.assertEqual(ql.is_origin_allowed(origin), ok, origin)
+        finally:
+            ql.ALLOWED_ORIGINS = old
+
 
 class S2AndEAlertTopics(unittest.TestCase):
     def test_s2_cell_token_calculation(self):

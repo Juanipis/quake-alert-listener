@@ -68,7 +68,7 @@ The full protocol walkthrough is in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)
 - **Local impact, not just magnitude:** every payload carries `estimated_mmi`, `mmi_label`, `distance_km`, `hypocentral_km` and `s_wave_eta_s`, so automations can say *"Shaking in 18 seconds"*.
 - **One policy for every source:** levels, cross-source de-duplication, escalation and cancellation are decided in one place, so adding a source never means rewriting automations.
 - **Home Assistant native:** structured webhooks (optionally HMAC-signed), REST sensors, ready-made automations and a dashboard card.
-- **Web console:** the [GitHub Pages app](https://juanipis.github.io/quake-alert-listener/) detects a bridge running on your machine and shows its live feeds; without one it runs a clearly-labelled simulation.
+- **Web console:** the [GitHub Pages app](https://juanipis.xyz/quake-alert-listener/) detects a bridge running on your machine and shows its live feeds; without one it runs a clearly-labelled simulation.
 
 ---
 
@@ -76,7 +76,7 @@ The full protocol walkthrough is in [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)
 
 ### Option A: try it without installing anything
 
-Launch a temporary bridge on port 8990. The [web console](https://juanipis.github.io/quake-alert-listener/) connects to it automatically:
+Launch a temporary bridge on port 8990. The [web console](https://juanipis.xyz/quake-alert-listener/) connects to it automatically:
 
 * **macOS / Linux:**
   ```bash
@@ -165,7 +165,7 @@ Every option can also be set with its environment variable (handy for Docker and
 | `--android-secret` | `QUAKE_ANDROID_SECRET` | `--webhook-secret` | HMAC-SHA256 key that `POST /android` requests must be signed with. Without any secret, `/android` only accepts clients on this machine |
 | `--http-port` | `QUAKE_HTTP_PORT` | `8990` | Local REST API port |
 | `--http-host` | `QUAKE_HTTP_HOST` | `127.0.0.1` | Interface the REST API binds to (`0.0.0.0` automatically inside Docker/Podman) |
-| `--allowed-origins` | `QUAKE_ALLOWED_ORIGINS` | `https://juanipis.github.io` | Browser origins allowed to use the REST API (`*` = any). Loopback origins and non-browser clients are always allowed |
+| `--allowed-origins` | `QUAKE_ALLOWED_ORIGINS` | `https://juanipis.xyz,https://juanipis.github.io` | Browser origins allowed to use the REST API (`*` = any). Loopback origins and non-browser clients are always allowed |
 | `--allowed-hosts` | `QUAKE_ALLOWED_HOSTS` | *None* | Extra host names the REST API answers to. IPs, `localhost` and this machine's hostname always work (`*` disables the check) |
 | `--no-http` | - | `False` | Disable the REST API |
 | `--shake-udp` | `QUAKE_SHAKE_UDP` | *off* | Listen for a Raspberry Shake UDP datacast on `[host:]port`, e.g. `8888` |

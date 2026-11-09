@@ -104,7 +104,7 @@ curl -sSL "$SCRIPT_URL" -o "$LISTENER_FILE"
 
 echo ""
 echo "🚀 Starting Quake MCS Bridge on http://127.0.0.1:8990 ..."
-echo "🌐 Open the live web app: https://juanipis.github.io/quake-alert-listener/"
+echo "🌐 Open the live web app: https://juanipis.xyz/quake-alert-listener/"
 echo "   (The web app will automatically detect this bridge and connect in real-time)"
 echo "⌨️  Press Ctrl+C at any time to stop."
 echo ""

@@ -82,7 +82,7 @@ CREDENTIALS_FILE = DEFAULT_CREDENTIALS_FILE
 # Browser origins allowed to use the REST API (CORS). Requests without an Origin
 # header (curl, Home Assistant rest/rest_command) are always accepted. Loopback
 # origins (http://127.0.0.1:*, http://localhost:*, http://[::1]:*) are always accepted.
-DEFAULT_ALLOWED_ORIGINS = "https://juanipis.github.io"
+DEFAULT_ALLOWED_ORIGINS = "https://juanipis.xyz,https://juanipis.github.io"
 ALLOWED_ORIGINS = set(DEFAULT_ALLOWED_ORIGINS.split(","))
 
 # Host names the REST API answers to (DNS-rebinding guard). IP literals, "localhost"
